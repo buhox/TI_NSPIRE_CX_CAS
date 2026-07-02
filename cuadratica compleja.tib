@@ -1,0 +1,41 @@
+PROGRAM:QUADCPLX
+Lbl ST
+ClrHome
+Disp "AX^2+BX+C=0"
+Input "A=",A
+If A=0
+Goto ST
+Input "B=",B
+Input "C=",C
+B^2-4*A*C→D
+If D=0
+Goto RPT
+If D>0
+Goto TWOREAL
+Goto CPLX
+Lbl RPT
+ClrHome
+Disp "RAIZ DOBLE"
+-B/(2*A)→X
+Disp "X=",X
+Pause
+Goto ST
+Lbl TWOREAL
+ClrHome
+Disp "DOS RAICES REALES"
+(-B+√(D))/(2*A)→X
+(-B-√(D))/(2*A)→Y
+Disp "X1=",X
+Disp "X2=",Y
+Pause
+Goto ST
+Lbl CPLX
+ClrHome
+Disp "RAICES COMPLEJAS"
+-B/(2*A)→P
+√(-D)/(2*A)→Q
+Disp "PARTE REAL=",P
+Disp "PARTE IMAG=",Q
+Disp "X1=P+Qi  X2=P-Qi"
+Pause
+Goto ST
