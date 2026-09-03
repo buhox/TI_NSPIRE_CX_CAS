@@ -15,6 +15,7 @@ _SECCIONES = [
     ("circuitos", "⚡  Circuitos AC/DC"),
     ("campos",    "🧲  Campos eléc./magn."),
     ("movimiento", "🚀  Movimiento y energía"),
+    ("ondas",     "🌊  Ondas"),
     ("graficas",  "📈  Gráficas"),
     ("tibasic",   "💾  TI-Basic"),
     ("archivos",  "📁  Archivos"),
@@ -231,6 +232,41 @@ conservacion_momento(m1=2, m2=1, v1i=3, v2i=0, v1f=2)  → v2f = 2 m/s</pre>
 antes y después, y dice si el choque fue elástico o inelástico. Verificado contra
 valores de libro: péndulo de 1 m = 2.006 s, Kepler da Marte = 1.881 años, órbita
 de 400 km = 7.67 km/s y 92 min de periodo.</p>
+
+<h2 id="ondas">🌊 Ondas</h2>
+<p>Las 16 fórmulas de la sección 2 de física de la librería FX-880P (pág. 272),
+desde ondas mecánicas hasta física cuántica. Constantes h, c y masa del electrón
+desde <code>scipy.constants</code>.</p>
+<pre>velocidad_sonido(temperatura=25)                      → 346.8 m/s
+efecto_doppler(f_fuente=1000, v_fuente=30)            → 1095 Hz (se acerca)
+angulo_critico(n1=1.33)                               → θc = 48.75° (agua-aire)
+efecto_fotoelectrico(trabajo_ev=2.28, longitud_onda=400e-9) → Ek = 0.82 eV
+onda_luminosa(longitud_onda=500e-9)                   → 2.48 eV</pre>
+<table>
+<tr><th>Función</th><th>Fórmula</th><th>Parámetros (deja en blanco la incógnita)</th></tr>
+<tr><td><code>onda</code></td><td>v = λ·f</td><td><code>v, longitud_onda, frecuencia</code></td></tr>
+<tr><td><code>onda_viajera</code></td><td>y = A·sen[2π(t/T − x/λ)]</td><td><code>amplitud, longitud_onda, periodo, x, t</code></td></tr>
+<tr><td><code>velocidad_cuerda</code></td><td>v = √(F/μ)</td><td><code>tension, densidad_lineal, v</code></td></tr>
+<tr><td><code>interferencia</code></td><td>Δl = nλ (constr.) · (n+½)λ (destr.)</td><td><code>diferencia_camino, longitud_onda, n, tipo</code></td></tr>
+<tr><td><code>onda_estacionaria</code></td><td>L = nλ/2  ·  L = (2n−1)λ/4</td><td><code>longitud, longitud_onda, n, extremos, v</code></td></tr>
+<tr><td><code>refraccion</code></td><td>n₁·sen(θ₁) = n₂·sen(θ₂)</td><td><code>theta1, theta2, n1, n2, v1</code></td></tr>
+<tr><td><code>frecuencia_natural_cuerda</code></td><td>f = (n/2L)·√(F/μ)</td><td><code>longitud, tension, densidad_lineal, n</code></td></tr>
+<tr><td><code>velocidad_sonido</code></td><td>v = 331.5 + 0.61·T</td><td><code>temperatura</code> (°C)</td></tr>
+<tr><td><code>efecto_doppler</code></td><td>f' = f·(v+v_obs)/(v−v_fuente)</td><td><code>f_fuente, v_observador, v_fuente, v_sonido, temperatura</code></td></tr>
+<tr><td><code>batido</code></td><td>f = |f₁ − f₂|</td><td><code>f1, f2</code></td></tr>
+<tr><td><code>reflectividad</code></td><td>R = ((n₁−n₂)/(n₁+n₂))²</td><td><code>n1, n2</code></td></tr>
+<tr><td><code>angulo_critico</code></td><td>sen(θc) = n₂/n₁</td><td><code>n1, n2</code></td></tr>
+<tr><td><code>onda_de_broglie</code></td><td>λ = h/(m·v)</td><td><code>masa, velocidad, longitud_onda</code></td></tr>
+<tr><td><code>condicion_cuantica</code></td><td>2πr = nλ; m·v·r = n·ħ</td><td><code>n, masa, velocidad, r</code></td></tr>
+<tr><td><code>efecto_fotoelectrico</code></td><td>h·ν = W + Ek_máx</td><td><code>trabajo_ev</code> + <code>longitud_onda</code> o <code>frecuencia</code></td></tr>
+<tr><td><code>condicion_frecuencia</code></td><td>h·ν = Em − En</td><td><code>em_ev, en_ev, frecuencia, longitud_onda</code></td></tr>
+<tr><td><code>onda_luminosa</code></td><td>λ = c/ν;  E = h·ν</td><td>uno de <code>longitud_onda, frecuencia, energia_ev</code></td></tr>
+</table>
+<p class="nota"><code>interferencia</code> deduce sola si el patrón es constructivo,
+destructivo o parcial cuando le das Δl y λ. <code>onda_estacionaria</code> distingue
+extremos <code>fijos</code> (L=nλ/2) de un extremo <code>libre</code> (L=(2n−1)λ/4).
+Verificado contra valores de libro: Snell 30°→22.08° al agua, ángulo crítico
+agua-aire 48.75°, radio de Bohr 0.529 Å, Balmer α 656 nm, fotón de 500 nm = 2.48 eV.</p>
 
 <h2 id="graficas">📈 Gráficas</h2>
 <p>Pestaña <b>Gráficas</b>: elige el modo con los botones superiores.</p>

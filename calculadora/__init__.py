@@ -28,3 +28,9 @@ from .movimiento import (
     energia_potencial_gravitatoria, velocidad_orbital,
     momento_inercia, momento_angular, conservacion_momento,
 )
+from .ondas import (
+    onda, onda_viajera, velocidad_cuerda, interferencia, onda_estacionaria,
+    refraccion, frecuencia_natural_cuerda, velocidad_sonido, efecto_doppler,
+    batido, reflectividad, angulo_critico, onda_de_broglie,
+    condicion_cuantica, efecto_fotoelectrico, condicion_frecuencia, onda_luminosa,
+)

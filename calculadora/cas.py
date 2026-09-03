@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Any
 
-from . import campos, circuitos, movimiento   # se registran en formulas.REGISTRO al importarse
+from . import campos, circuitos, movimiento, ondas   # se registran en formulas.REGISTRO al importarse
 from .formulas import REGISTRO
 
 logger = logging.getLogger("ti_nspire.cas")
