@@ -20,3 +20,11 @@ from .campos import (
     flujo_magnetico, fuerza_lorentz, electron_campo_magnetico,
     ley_faraday, induccion_electromagnetica, induccion_mutua, autoinduccion,
 )
+from .movimiento import (
+    movimiento_acelerado, segunda_ley_newton, movimiento_circular,
+    oscilacion_armonica, ley_hooke, oscilacion_resorte, pendulo_simple,
+    energia_potencial, energia_elastica, energia_cinetica,
+    coeficiente_friccion, trabajo, ley_kepler, gravitacion_universal,
+    energia_potencial_gravitatoria, velocidad_orbital,
+    momento_inercia, momento_angular, conservacion_momento,
+)

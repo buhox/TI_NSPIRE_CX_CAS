@@ -14,6 +14,7 @@ _SECCIONES = [
     ("matrices",  "⬛  Matrices"),
     ("circuitos", "⚡  Circuitos AC/DC"),
     ("campos",    "🧲  Campos eléc./magn."),
+    ("movimiento", "🚀  Movimiento y energía"),
     ("graficas",  "📈  Gráficas"),
     ("tibasic",   "💾  TI-Basic"),
     ("archivos",  "📁  Archivos"),
@@ -192,6 +193,44 @@ autoinduccion(l=0.1, delta_i=2, delta_t=0.01)      → V = -20 V</pre>
 que están escritas en su forma estándar SI y verificadas contra valores de
 referencia conocidos (k₀, ε₀, el electrón a 1 V = 5.93×10⁵ m/s, el ciclotrón
 del electrón en 1 T = 27.99 GHz).</p>
+
+<h2 id="movimiento">🚀 Movimiento y energía</h2>
+<p>Las 20 fórmulas de la sección 1 de física de la librería FX-880P (pág. 270).
+Constantes g y G desde <code>scipy.constants</code>.</p>
+<pre>movimiento_acelerado(v0=0, a=9.81, t=3)      → v = 29.4 m/s, s = 44.1 m
+pendulo_simple(longitud=1)                    → T = 2.006 s
+ley_kepler(t1=1, r1=1, r2=1.524)              → T2 = 1.881 años (Marte)
+velocidad_orbital(m_central=5.972e24, r=6.771e6) → v = 7672 m/s, T = 92 min
+conservacion_momento(m1=2, m2=1, v1i=3, v2i=0, v1f=2)  → v2f = 2 m/s</pre>
+<table>
+<tr><th>Función</th><th>Fórmula</th><th>Parámetros (deja en blanco la incógnita)</th></tr>
+<tr><td><code>movimiento_acelerado</code></td><td>v=v₀+at; s=v₀t+½at²; v²=v₀²+2as</td><td><code>v0, a, t, v, s</code> — da tres, deduce el resto</td></tr>
+<tr><td><code>segunda_ley_newton</code></td><td>F = m·a</td><td><code>f, m, a</code></td></tr>
+<tr><td><code>movimiento_circular</code></td><td>v=ωr; a_c=v²/r; T=2π/ω</td><td><code>r</code> + <code>v</code> u <code>omega</code>, opcional <code>m</code></td></tr>
+<tr><td><code>oscilacion_armonica</code></td><td>x=A·sen(ωt+φ)</td><td><code>amplitud, omega, t, fase</code></td></tr>
+<tr><td><code>ley_hooke</code></td><td>F = k·x</td><td><code>f, k, x</code></td></tr>
+<tr><td><code>oscilacion_resorte</code></td><td>T = 2π√(m/k)</td><td><code>m, k, periodo</code></td></tr>
+<tr><td><code>pendulo_simple</code></td><td>T = 2π√(L/g)</td><td><code>longitud, periodo, g</code></td></tr>
+<tr><td><code>energia_potencial</code></td><td>Ep = m·g·h</td><td><code>m, h, energia, g</code></td></tr>
+<tr><td><code>energia_elastica</code></td><td>Ep = ½k·x²</td><td><code>k, x, energia</code></td></tr>
+<tr><td><code>energia_cinetica</code></td><td>Ek = ½m·v²</td><td><code>m, v, energia</code></td></tr>
+<tr><td><code>coeficiente_friccion</code></td><td>F = μ·N</td><td><code>f, mu, n</code></td></tr>
+<tr><td><code>trabajo</code></td><td>W = F·s·cos(θ)</td><td><code>f, s, w, angulo</code></td></tr>
+<tr><td><code>ley_kepler</code></td><td>T²/r³ = constante</td><td><code>t1, r1, t2, r2</code></td></tr>
+<tr><td><code>gravitacion_universal</code></td><td>F = G·m₁m₂/r²</td><td><code>f, m1, m2, r</code></td></tr>
+<tr><td><code>energia_potencial_gravitatoria</code></td><td>Ep = −G·m₁m₂/r</td><td><code>m1, m2, r</code></td></tr>
+<tr><td><code>velocidad_orbital</code></td><td>v = √(GM/r); T = 2πr/v</td><td><code>m_central, r</code> + opcional <code>m_satelite</code></td></tr>
+<tr><td><code>momento_inercia</code></td><td>I = c·m·r²</td><td><code>m, r, forma</code></td></tr>
+<tr><td><code>momento_angular</code></td><td>L = I·ω  o  L = m·v·r</td><td><code>i, omega, l</code>  o  <code>m, v, r</code></td></tr>
+<tr><td><code>conservacion_momento</code></td><td>m₁v₁ᵢ+m₂v₂ᵢ = m₁v₁f+m₂v₂f</td><td><code>m1, m2, v1i, v2i, v1f, v2f</code></td></tr>
+</table>
+<p><b>Formas de <code>momento_inercia</code></b>: <code>puntual</code>, <code>aro</code>,
+<code>disco</code>, <code>cilindro</code>, <code>esfera</code>, <code>esfera_hueca</code>,
+<code>varilla_centro</code>, <code>varilla_extremo</code> (en las varillas, r es la longitud).</p>
+<p class="nota"><code>conservacion_momento</code> además compara la energía cinética
+antes y después, y dice si el choque fue elástico o inelástico. Verificado contra
+valores de libro: péndulo de 1 m = 2.006 s, Kepler da Marte = 1.881 años, órbita
+de 400 km = 7.67 km/s y 92 min de periodo.</p>
 
 <h2 id="graficas">📈 Gráficas</h2>
 <p>Pestaña <b>Gráficas</b>: elige el modo con los botones superiores.</p>
