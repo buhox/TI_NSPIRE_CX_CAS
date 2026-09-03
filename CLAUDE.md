@@ -21,7 +21,7 @@ Aplicación de escritorio PyQt5 para gestionar la calculadora TI-Nspire CX CAS.
 - `pruebas_calc.py` — Banco de pruebas del backend con la calculadora conectada
 - `calculadora/cas.py` — Cálculos CAS con SymPy
 - `calculadora/graficas.py` — Gráficas matemáticas con Matplotlib
-- `calculadora/ti_basic.py` — Programas TI-Basic
+- `calculadora/ti_basic.py` — Intérprete de TI-Basic de TI-Nspire
 
 ## Dependencias
 ```
@@ -106,11 +106,44 @@ conectar · listar · info (OS/batería/RAM/Flash) · enviar · recibir · elimi
 captura de pantalla · crear carpeta · **renombrar**. Repetir con
 `python3 pruebas_calc.py`.
 
-**El flasheo del OS está implementado pero NO se ha ejecutado nunca**: haría falta
-una imagen `.tcc` real y es una operación que puede inutilizar la calculadora. Lo
-que sí está probado son sus guardas: rechaza archivos que no son de TI, que no son
-imágenes de OS, de otro modelo, y las imágenes sin CAS sobre una calculadora CAS.
-Además comprueba la batería antes de empezar.
+## PENDIENTE: flasheo del OS (nunca ejecutado contra hardware real)
+`actualizar_os()` en `comunicacion/transferencia.py:1032` está implementado pero
+**nunca se ha ejecutado de punta a punta**. Falta lo único que no se puede
+fabricar en el código: una imagen `.tcc` real (Nspire CX CAS) de TI. Es una
+operación de riesgo (línea 1038): una interrupción a mitad de escritura —cable
+suelto, batería agotada— puede dejar la calculadora en modo de emergencia o
+inutilizarla.
+
+Lo que sí está probado (por lógica, sin escritura real):
+- Rechaza archivos que no son de Texas Instruments (`tifiles_file_is_ti`).
+- Rechaza archivos que no son imagen de OS (`tifiles_file_is_os`/`is_tno`).
+- Rechaza imágenes de otro modelo que no sea Nspire.
+- Compara la extensión (`.tcc`/`.tco`/`.tnc`/`.tno`) contra el `product_name`
+  real de la calculadora para no instalar una imagen sin CAS sobre una CAS.
+- Aborta si el flag de batería (`INFOS_BATTERY`) indica batería baja.
+
+Para poder marcarlo como probado hace falta: conseguir una imagen `.tcc`
+oficial, probar con batería alta y cable estable, ejecutar el flasheo una vez
+y confirmar que la calculadora arranca normal después.
+
+## Panel TI-Basic
+`calculadora/ti_basic.py` interpreta el TI-Basic **de la TI-Nspire**: `Define …
+Func/Prgm`, `Local`, `→`, `EndIf`/`EndFor`/`EndWhile`/`EndLoop`, `Try/Else/EndTry`,
+`Exit`/`Cycle`, `Lbl`/`Goto`, `Disp`/`Request`, comentarios con `©`.
+
+Tres detalles del lenguaje que no son los de Python y el intérprete respeta:
+- **Listas y cadenas se indexan desde 1** (clases `TIList` y `TICadena`).
+- **Los identificadores no distinguen mayúsculas**: se normalizan a minúsculas.
+- **`=` compara**; para guardar se usa `→` o `:=`.
+
+Las expresiones se traducen a Python y se evalúan (`traducir()` en ese módulo).
+Los programas **corren en el PC y no se pueden subir a la calculadora**: un
+`.tns` es un documento que libtifiles trata como bloque opaco, se transfiere
+pero no se crea. Tampoco hay CAS simbólico aquí. Referencia del lenguaje y lo
+que falta: `docs/referencia_tibasic.md`.
+
+Antes había un intérprete de BASIC de TI-99/4A y TI-8x (`LET`, `GOSUB`,
+`CALL SOUND`, `L1..L6`) que no tenía nada que ver con la Nspire. Se eliminó.
 
 ## Notas técnicas
 - El detector USB lee `/sys/bus/usb/devices` directamente, sin libusb/pyusb, para evitar conflictos con ticables

@@ -18,6 +18,7 @@ from .panel_graficas import PanelGraficas
 from .panel_matriz import PanelMatriz
 from .panel_tibasic import PanelTIBasic
 from .panel_archivos import PanelArchivos
+from .panel_manual import PanelManual
 from .barra_estado import BarraEstado
 from comunicacion.detector import MonitorUSB, InfoCalculadora
 
@@ -69,12 +70,14 @@ class VentanaPrincipal(QMainWindow):
         self._panel_matriz   = PanelMatriz()
         self._panel_tibasic  = PanelTIBasic()
         self._panel_archivos = PanelArchivos()
+        self._panel_manual   = PanelManual()
 
         self._tabs.addTab(self._panel_cas,      "🧮  CAS / Álgebra")
         self._tabs.addTab(self._panel_graficas, "📈  Gráficas")
         self._tabs.addTab(self._panel_matriz,   "⬛  Matrices")
         self._tabs.addTab(self._panel_tibasic,  "💾  TI-Basic")
         self._tabs.addTab(self._panel_archivos, "📁  Archivos")
+        self._tabs.addTab(self._panel_manual,   "📖  Manual")
 
         layout.addWidget(self._tabs, 1)
 
