@@ -46,28 +46,45 @@ Usa la lista de la izquierda para saltar de sección, o el buscador de arriba.</
 <h2 id="cas">🧮 CAS / Álgebra</h2>
 <p>Pestaña <b>CAS / Álgebra</b>: escribe la expresión en la consola (prompt <code>&gt;&gt;</code>)
 y presiona Enter. El menú <b>Operación</b> decide cómo se interpreta lo que escribas.</p>
+<p>En la consola va <b>solo la expresión</b>, sin el nombre de la operación: la
+operación se elige en el menú y los datos extra (variable, límites, punto, orden)
+van en los campos de <b>Parámetros</b>, debajo del menú.</p>
 <table>
-<tr><th>Operación del menú</th><th>Función</th><th>Ejemplo de entrada</th></tr>
-<tr><td>Evaluar / Simplificar</td><td><code>evaluar</code></td><td><code>2+3</code> · <code>sin(pi/2)</code></td></tr>
-<tr><td>Expandir</td><td><code>expandir</code></td><td><code>(x+1)^2</code></td></tr>
-<tr><td>Factorizar</td><td><code>factorizar</code></td><td><code>x^2-4</code></td></tr>
-<tr><td>Resolver (variable x)</td><td><code>resolver</code></td><td><code>x^2-4=0</code></td></tr>
-<tr><td>Derivar (respecto a x)</td><td><code>derivar</code></td><td><code>x^3</code></td></tr>
-<tr><td>Integrar (indefinida)</td><td><code>integrar</code></td><td><code>x^2</code></td></tr>
-<tr><td>Integrar (definida)</td><td><code>integrar</code></td><td>usa los campos Punto/Orden como límites</td></tr>
-<tr><td>Límite</td><td><code>limite</code></td><td>campo Punto = valor, campo Orden = dirección (+, -, +-)</td></tr>
-<tr><td>Serie de Taylor</td><td><code>serie_taylor</code></td><td>campo Punto = centro, campo Orden = grado</td></tr>
-<tr><td>Fracciones parciales</td><td><code>fracciones_parciales</code></td><td><code>1/(x^2-1)</code></td></tr>
-<tr><td>Factores primos</td><td><code>factores_primos</code></td><td><code>360</code> → 2³×3²×5</td></tr>
-<tr><td>Es primo</td><td><code>es_primo</code></td><td><code>17</code></td></tr>
+<tr><th>Operación del menú</th><th>Qué escribes en la consola</th><th>Campos de Parámetros que usa</th><th>Resultado</th></tr>
+<tr><td>Evaluar / Simplificar</td><td><code>2+3</code><br><code>sin(pi/2)</code><br><code>sqrt(18)</code></td><td>ninguno</td><td>5 · 1 · 3√2</td></tr>
+<tr><td>Expandir</td><td><code>(x+1)^2</code></td><td>ninguno</td><td>x² + 2x + 1</td></tr>
+<tr><td>Factorizar</td><td><code>x^2-4</code></td><td>ninguno</td><td>(x−2)(x+2)</td></tr>
+<tr><td>Resolver</td><td><code>x^2-4</code><br><code>x^2-4=0</code><br><code>x+y=5, x-y=1</code> (sistema)</td><td><b>Variable</b> = <code>x</code><br>o <code>x,y</code> para un sistema</td><td>[−2, 2]<br>{x: 3, y: 2}</td></tr>
+<tr><td>Derivar</td><td><code>x^3</code><br><code>sin(x)*x^2</code></td><td><b>Variable</b> = <code>x</code></td><td>3x²</td></tr>
+<tr><td>Integrar (indefinida)</td><td><code>x^2</code></td><td><b>Variable</b> = <code>x</code></td><td>x³/3</td></tr>
+<tr><td>Integrar (definida)</td><td><code>x^2</code></td><td><b>Variable</b>=<code>x</code>, <b>Desde</b>=<code>0</code>, <b>Hasta</b>=<code>1</code></td><td>1/3</td></tr>
+<tr><td>Límite</td><td><code>sin(x)/x</code></td><td><b>Variable</b>=<code>x</code>, <b>Punto</b>=<code>0</code>, <b>Dir +-</b>=<code>+-</code></td><td>1</td></tr>
+<tr><td>Serie de Taylor</td><td><code>exp(x)</code></td><td><b>Variable</b>=<code>x</code>, <b>Punto</b>=<code>0</code>, <b>Orden</b>=<code>6</code></td><td>1+x+x²/2+…</td></tr>
+<tr><td>Fracciones parciales</td><td><code>1/(x^2-1)</code></td><td><b>Variable</b> = <code>x</code></td><td>−1/(2(x+1)) + 1/(2(x−1))</td></tr>
+<tr><td>Factores primos</td><td><code>360</code> (solo un entero)</td><td>ninguno</td><td>2³ × 3² × 5</td></tr>
+<tr><td>Es primo</td><td><code>17</code> (solo un entero)</td><td>ninguno</td><td>17 es primo</td></tr>
+</table>
+<p><b>Detalles de los campos de Parámetros:</b></p>
+<table>
+<tr><th>Campo</th><th>Qué acepta</th></tr>
+<tr><td><b>Variable</b></td><td>El nombre de la variable respecto a la que se opera: <code>x</code>, <code>y</code>, <code>t</code>… (por defecto <code>x</code>)</td></tr>
+<tr><td><b>Desde</b> / <b>Hasta</b></td><td>Límites de la integral definida. Admiten expresiones: <code>0</code>, <code>pi</code>, <code>2*pi</code>, <code>oo</code> (infinito)</td></tr>
+<tr><td><b>Punto</b></td><td>Dónde se evalúa el límite o dónde se centra la serie: <code>0</code>, <code>1</code>, <code>pi/2</code>, <code>oo</code></td></tr>
+<tr><td><b>Dir +-</b></td><td>Dirección del límite: <code>+</code> (por la derecha), <code>-</code> (por la izquierda) o <code>+-</code> (bilateral, por defecto)</td></tr>
+<tr><td><b>Orden</b></td><td>Grado de la serie de Taylor (por defecto <code>6</code>)</td></tr>
 </table>
 <p><b>Símbolos TI que se traducen automáticamente:</b>
 <code>^</code>→potencia, <code>√</code>→raíz, <code>π</code>→pi, <code>∞</code>→infinito,
 <code>×</code>→<code>*</code>, <code>÷</code>→<code>/</code>. La multiplicación implícita
 funciona: <code>2x</code> = <code>2*x</code>. Variables por defecto:
 <code>x y z t n k a b c</code>.</p>
-<p class="nota">Además de esas 12 operaciones, la consola reconoce por nombre las 20
-fórmulas de Circuitos AC/DC — ver la sección de más abajo.</p>
+<p><b>Escribir sin nombre de operación no siempre alcanza:</b> además de esas 12
+operaciones del menú, la consola reconoce por nombre las <b>77 fórmulas de física</b>
+de las secciones de Circuitos, Campos, Movimiento y Ondas — esas sí se escriben como
+llamada de función, ej. <code>ley_ohm(v=12, i=2)</code>, y no dependen del menú
+(basta con tener seleccionado "Evaluar / Simplificar").</p>
+<p class="nota">En un sistema de ecuaciones, si el campo Variable nombra menos
+incógnitas que ecuaciones, se resuelve para todas las que aparezcan.</p>
 
 <h2 id="matrices">⬛ Matrices</h2>
 <p>Pestaña <b>Matrices</b>: define el tamaño, llena la tabla y pulsa el botón de

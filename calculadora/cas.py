@@ -181,36 +181,68 @@ def factorizar(expr_str: str) -> ResultadoCAS:
         return ResultadoCAS(error=str(e))
 
 
+def _dividir_nivel_superior(texto: str, separador: str = ",") -> list[str]:
+    """Divide por `separador`, ignorando los que estén dentro de paréntesis."""
+    partes, actual, profundidad = [], [], 0
+    for ch in texto:
+        if ch in "([{":
+            profundidad += 1
+        elif ch in ")]}":
+            profundidad -= 1
+        if ch == separador and profundidad == 0:
+            partes.append("".join(actual))
+            actual = []
+        else:
+            actual.append(ch)
+    partes.append("".join(actual))
+    return [p.strip() for p in partes if p.strip()]
+
+
+def _parsear_ecuacion(texto: str):
+    """Convierte "lhs = rhs" en Eq(lhs, rhs); sin "=", la expresión se iguala a 0."""
+    if "=" in texto and "==" not in texto:
+        izq, _, der = texto.partition("=")
+        return Eq(parse_expr(izq, local_dict=_VARS_DEFAULT,
+                             transformations=_TRANSFORMACIONES),
+                  parse_expr(der, local_dict=_VARS_DEFAULT,
+                             transformations=_TRANSFORMACIONES))
+    return parse_expr(texto, local_dict=_VARS_DEFAULT,
+                      transformations=_TRANSFORMACIONES)
+
+
 def resolver(ecuacion_str: str, variable: str = "x") -> ResultadoCAS:
     """
-    Resuelve una ecuación o sistema.
+    Resuelve una ecuación o un sistema.
 
     Formatos aceptados:
-        "x^2 - 4"         → solve respecto a x
-        "x^2 - 4 = 0"     → solve con igualdad explícita
-        "x + y = 5, x - y = 1"  → sistema (separado por comas)
+        "x^2 - 4"               → se iguala a cero, resuelve respecto a x
+        "x^2 - 4 = 0"           → con igualdad explícita
+        "x + y = 5, x - y = 1"  → sistema (ecuaciones separadas por comas)
+
+    En un sistema, si `variable` no nombra tantas incógnitas como ecuaciones,
+    se resuelve para todas las que aparezcan. `variable` también acepta varias
+    separadas por comas ("x,y").
     """
     if not _SYMPY_OK:
         return ResultadoCAS(error="SymPy no disponible")
     try:
-        var = symbols(variable)
         ecuacion_str = _normalizar_entrada(ecuacion_str)
+        ecuaciones = [_parsear_ecuacion(p)
+                      for p in _dividir_nivel_superior(ecuacion_str)]
+        if not ecuaciones:
+            return ResultadoCAS(error="No hay ninguna ecuación que resolver")
 
-        if "=" in ecuacion_str and "==" not in ecuacion_str:
-            lados = ecuacion_str.split("=", 1)
-            lhs = parse_expr(lados[0], local_dict=_VARS_DEFAULT,
-                             transformations=_TRANSFORMACIONES)
-            rhs = parse_expr(lados[1], local_dict=_VARS_DEFAULT,
-                             transformations=_TRANSFORMACIONES)
-            ec = Eq(lhs, rhs)
-            sol = solve(ec, var)
-        else:
-            expr = parse_expr(ecuacion_str, local_dict=_VARS_DEFAULT,
-                              transformations=_TRANSFORMACIONES)
-            sol = solve(expr, var)
+        incognitas = [symbols(v) for v in _dividir_nivel_superior(variable or "x")]
+        if len(ecuaciones) > 1 and len(incognitas) < len(ecuaciones):
+            # Sistema sin incógnitas suficientes nombradas: usa las que aparezcan
+            libres = set().union(*(ec.free_symbols for ec in ecuaciones))
+            incognitas = sorted(libres, key=lambda s: s.name)
 
-        res = sol
-        return ResultadoCAS(res, latex(res), pretty(res, use_unicode=True))
+        objetivo = ecuaciones if len(ecuaciones) > 1 else ecuaciones[0]
+        buscadas = incognitas if len(incognitas) > 1 else incognitas[0]
+        sol = solve(objetivo, buscadas)
+
+        return ResultadoCAS(sol, latex(sol), pretty(sol, use_unicode=True))
     except Exception as e:
         return ResultadoCAS(error=str(e))
 
