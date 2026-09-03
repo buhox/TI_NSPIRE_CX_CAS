@@ -25,171 +25,157 @@ from calculadora.ti_basic import TIBasicInterpreter
 # Programas de ejemplo
 # ---------------------------------------------------------------------------
 EJEMPLOS: dict[str, str] = {
-    # ── Estilo TI-Nspire CX CAS ──────────────────────────────────────────────
-    "Hola mundo (Nspire)": """:ClrHome
-:Disp "HOLA MUNDO"
-:Disp "TI-NSPIRE CX CAS"
-:Pause""",
 
-    "Contador For (Nspire)": """:ClrHome
-:Disp "CONTADOR:"
-:For(I,1,10)
-:Disp I
-:End
-:Disp "LISTO"
-:Pause""",
+    "Hola mundo": """Define hola()=Prgm
+  ClrIO
+  Disp "HOLA MUNDO"
+  Disp "TI-Nspire CX CAS"
+EndPrgm""",
 
-    "Ecuación cuadrática (Nspire)": """:ClrHome
-:Disp "AX²+BX+C=0"
-:Input "A=",A
-:Input "B=",B
-:Input "C=",C
-:B^2-4*A*C→D
-:If D<0
-:Then
-:Disp "SIN SOLUCIÓN REAL"
-:Else
-:If D=0
-:Then
-:Disp "X="
-:Disp -B/(2*A)
-:Else
-:Disp "X1="
-:Disp (-B+√(D))/(2*A)
-:Disp "X2="
-:Disp (-B-√(D))/(2*A)
-:End
-:End
-:Pause""",
+    "Contador con For": """Define contar(n)=Prgm
+  Local i
+  ClrIO
+  For i,1,n
+    Disp i
+  EndFor
+  Disp "listo"
+EndPrgm
 
-    "Fibonacci (Nspire)": """:ClrHome
-:Input "N términos:",N
-:0→A
-:1→B
-:Disp "SERIE FIBONACCI:"
-:For(I,1,N)
-:Disp A
-:A+B→C
-:B→A
-:C→B
-:End
-:Pause""",
+Define main()=Prgm
+  contar(10)
+EndPrgm""",
 
-    "Tabla de multiplicar (Nspire)": """:ClrHome
-:Input "Tabla del:",N
-:Disp "TABLA:"
-:For(I,1,10)
-:Disp N*I
-:End
-:Pause""",
+    "Ecuación cuadrática": """© Resuelve ax²+bx+c=0
+Define cuadratica(a,b,c)=Func
+  Local d
+  b^2-4*a*c→d
+  If d<0 Then
+    Return "sin raíces reales"
+  ElseIf d=0 Then
+    Return {-b/(2*a)}
+  Else
+    Return {(-b+√(d))/(2*a),(-b-√(d))/(2*a)}
+  EndIf
+EndFunc
 
-    "Número primo": """:ClrHome
-:Input "Número:",N
-:1→P
-:For(I,2,√(N))
-:If frac(N/I)=0
-:Then
-:0→P
-:End
-:End
-:If P=1 and N>1
-:Then
-:Disp "ES PRIMO"
-:Else
-:Disp "NO ES PRIMO"
-:End
-:Pause""",
+Define main()=Prgm
+  Local a,b,c
+  ClrIO
+  Request "a=",a
+  Request "b=",b
+  Request "c=",c
+  Disp "raíces:",cuadratica(a,b,c)
+EndPrgm""",
 
-    "While: suma de dígitos (Nspire)": """:ClrHome
-:Input "Número:",N
-:0→S
-:While N>0
-:N-int(N/10)*10→D
-:S+D→S
-:int(N/10)→N
-:End
-:Disp "SUMA DÍGITOS="
-:Disp S
-:Pause""",
+    "Factorial (recursivo)": """Define fact(n)=Func
+  If n≤1 Then
+    Return 1
+  EndIf
+  Return n*fact(n-1)
+EndFunc
 
-    # ── Estilo TI-99/4A Extended Basic ───────────────────────────────────────
-    "Hola mundo (TI-99/4A)": """100 REM HOLA MUNDO
-110 CALL CLEAR
-120 PRINT "HOLA MUNDO"
-130 PRINT "TI-99/4A EXTENDED BASIC"
-140 END""",
+Define main()=Prgm
+  Local i
+  ClrIO
+  For i,1,10
+    Disp i,"! =",fact(i)
+  EndFor
+EndPrgm""",
 
-    "FOR/NEXT (TI-99/4A)": """100 REM SUMA DE 1 A N CON FOR/NEXT
-110 INPUT "N=": N
-120 S = 0
-130 FOR I = 1 TO N
-140   S = S + I
-150 NEXT I
-160 PRINT "SUMA 1 A ";N;" = ";S
-170 END""",
+    "Listas y estadística": """Define main()=Prgm
+  Local l,i,s
+  ClrIO
+  {4,8,15,16,23,42}→l
+  Disp "lista:",l
+  Disp "elementos:",dim(l)
+  Disp "suma:",sum(l)
+  Disp "media:",mean(l)
+  Disp "máximo:",max(l)
+  © las listas de la Nspire empiezan en 1
+  Disp "primero:",l[1]
+  Disp "último:",l[dim(l)]
+  0→s
+  For i,1,dim(l)
+    s+l[i]^2→s
+  EndFor
+  Disp "suma de cuadrados:",s
+EndPrgm""",
 
-    "GOSUB/RETURN (TI-99/4A)": """100 REM SUBRUTINAS CON GOSUB
-110 INPUT "RADIO=": R
-120 GOSUB 500
-130 PRINT "AREA = ";A
-140 PRINT "PERIMETRO = ";P
-150 END
-500 REM SUBRUTINA CIRCULO
-510 A = PI * R * R
-520 P = 2 * PI * R
-530 RETURN""",
+    "While y Exit": """Define colatz(n)=Prgm
+  Local pasos
+  0→pasos
+  ClrIO
+  Disp "Collatz de",n
+  While n≠1
+    If mod(n,2)=0 Then
+      n/2→n
+    Else
+      3*n+1→n
+    EndIf
+    pasos+1→pasos
+    Disp n
+    If pasos>200
+      Exit
+  EndWhile
+  Disp "pasos:",pasos
+EndPrgm
 
-    "Cadenas: CHR$/ASC (TI-99/4A)": """100 REM FUNCIONES DE CADENA
-110 CALL CLEAR
-120 FOR I = 65 TO 90
-130   PRINT CHR$(I);
-140 NEXT I
-150 PRINT
-160 PRINT "LEN=";LEN("TEXAS")
-170 PRINT "SEG=";SEG$("TEXAS",2,3)
-180 PRINT "ASC(T)=";ASC("TEXAS")
-190 PRINT "RPT=";RPT$("*",10)
-200 END""",
+Define main()=Prgm
+  colatz(27)
+EndPrgm""",
 
-    "DATA/READ (TI-99/4A)": """100 REM LECTURA DE DATOS
-110 CALL CLEAR
-120 DATA 10, 20, 30, 40, 50
-130 S = 0
-140 FOR I = 1 TO 5
-150   READ X
-160   S = S + X
-170   PRINT "X=";X
-180 NEXT I
-190 PRINT "SUMA=";S
-200 END""",
+    "Try / manejo de errores": """Define seguro(a,b)=Func
+  Try
+    Return a/b
+  Else
+    Return "no se puede dividir entre cero"
+  EndTry
+EndFunc
 
-    "ON GOTO (TI-99/4A)": """100 REM MENU CON ON GOTO
-110 CALL CLEAR
-120 PRINT "1-CUADRADO  2-CUBO  3-RAIZ"
-130 INPUT "OPCION (1-3)=": OP
-140 ON OP GOTO 200, 300, 400
-150 PRINT "OPCION INVALIDA"
-160 GOTO 500
-200 INPUT "N=": N
-210 PRINT N;"^2 = ";N*N
-220 GOTO 500
-300 INPUT "N=": N
-310 PRINT N;"^3 = ";N*N*N
-320 GOTO 500
-400 INPUT "N=": N
-410 PRINT "SQR(";N;")=";SQR(N)
-500 END""",
+Define main()=Prgm
+  ClrIO
+  Disp seguro(10,2)
+  Disp seguro(10,0)
+EndPrgm""",
 
-    "DEF función propia (TI-99/4A)": """100 REM FUNCIONES DEFINIDAS POR USUARIO
-110 DEF CUADRADO(X) = X*X
-120 DEF CUBO(X) = X*X*X
-130 DEF HIPO(A,B) = SQR(A*A+B*B)
-140 CALL CLEAR
-150 FOR N = 1 TO 5
-160   PRINT N;"  Q=";CUADRADO(N);"  C=";CUBO(N)
-170 NEXT N
-180 PRINT "HIPOTENUSA(3,4)=";HIPO(3,4)
-190 END""",
+    "Cadenas": """Define main()=Prgm
+  Local s,i,r
+  ClrIO
+  "TI-Nspire"→s
+  Disp "texto:",s
+  Disp "longitud:",dim(s)
+  Disp "primeras 2:",left(s,2)
+  Disp "últimas 6:",right(s,6)
+  Disp "del 4 al 6:",mid(s,4,3)
+  ""→r
+  For i,dim(s),1,-1
+    r&s[i]→r
+  EndFor
+  Disp "al revés:",r
+EndPrgm""",
+
+    "Lbl y Goto": """Define main()=Prgm
+  Local i
+  ClrIO
+  0→i
+  Lbl otra
+  i+1→i
+  Disp "vuelta",i
+  If i<5
+    Goto otra
+  Disp "fin"
+EndPrgm""",
+
+    "Matrices": """Define main()=Prgm
+  Local m
+  ClrIO
+  [[1,2][3,4]]→m
+  Disp "m[1,1]=",m[1,1]
+  Disp "m[1,2]=",m[1,2]
+  Disp "m[2,1]=",m[2,1]
+  Disp "m[2,2]=",m[2,2]
+  Disp "fila 1:",m[1]
+EndPrgm""",
 }
 
 
@@ -221,45 +207,45 @@ class _Highlighter(QSyntaxHighlighter):
                 fmt.setFontItalic(True)
             self._rules.append((re.compile(pattern, re.IGNORECASE), fmt))
 
-        # Palabras clave de control (Nspire + TI-99/4A)
-        rule(r'\b(If|Then|Else|End|For|While|Repeat|Goto|Lbl|Return|Stop|'
-             r'Next|Gosub|To|Step|Sub|SubEnd|SubExit|On|Break|Continue|'
-             r'Unbreak|Trace|UnTrace)\b',
+        # Estructuras de control
+        rule(r'\b(If|Then|ElseIf|Else|EndIf|For|EndFor|While|EndWhile|'
+             r'Loop|EndLoop|Exit|Cycle|Try|EndTry|ClrErr|PassErr|'
+             r'Lbl|Goto|Return|Stop)\b',
              '#1f6feb', bold=True)
-        # Comandos de I/O
-        rule(r'\b(Disp|Print|Input|LinInput|Prompt|Output|Display|Accept|'
-             r'ClrHome|Pause|Menu|Call)\b',
-             '#3dc9b0', bold=True)
-        # Definición / declaración
-        rule(r'\b(Def|Dim|Data|Read|Restore|Let|Rem|Randomize|New|Bye|'
-             r'Run|List|Size|Delete|Merge|Save|Load)\b',
+        # Definición de funciones y programas
+        rule(r'\b(Define|Func|EndFunc|Prgm|EndPrgm|Local|DelVar|'
+             r'LibPub|LibPriv)\b',
              '#c678dd', bold=True)
+        # Entrada / salida
+        rule(r'\b(Disp|DispAt|Text|Output|Request|RequestStr|Input|InputStr|'
+             r'Pause|ClrIO|ClrHome)\b',
+             '#3dc9b0', bold=True)
         # Funciones matemáticas
-        rule(r'\b(sin|cos|tan|asin|acos|atan|ATN|sqrt|SQR|abs|ABS|'
-             r'log|LOG|ln|exp|EXP|int|INT|round|frac|iPart|'
-             r'max|MAX|min|MIN|rand|RND|randInt|SGN|sgn|not|PI|pi)\s*\(',
+        rule(r'\b(abs|sqrt|root|ln|log|exp|int|iPart|fPart|round|floor|'
+             r'ceiling|sign|mod|remain|gcd|lcm|nCr|nPr|factorial|'
+             r'max|min|sum|product|mean|approx|'
+             r'sin|cos|tan|arcsin|arccos|arctan|sinh|cosh|tanh|'
+             r'rand|randInt|when)\s*\(',
              '#e5c07b')
-        # Funciones de cadena
-        rule(r'\b(LEN|ASC|CHR\$?|STR\$?|VAL|SEG\$?|RPT\$?|POS|TAB)\s*\(',
+        # Funciones de listas y cadenas
+        rule(r'\b(dim|augment|left|right|mid|inString|sortA|sortD|'
+             r'char|ord|string|expr)\s*\(',
              '#56b6c2', bold=True)
         # Constantes
-        rule(r'\b(pi|PI|e)\b', '#c678dd')
-        # Variables de cadena Str1-Str9 y con $
-        rule(r'\bStr[1-9]\b|\b\w+\$', '#e06c75')
-        # Variables de lista L1-L6
-        rule(r'\bL[1-6]\b', '#d19a66')
+        rule(r'\b(pi|true|false|undef|infinity)\b|π|∞', '#c678dd')
+        # Operadores lógicos
+        rule(r'\b(and|or|not|xor)\b', '#1f6feb')
         # Cadenas entre comillas
         rule(r'"[^"]*"', '#98c379')
-        # Números de línea al inicio
-        rule(r'^\d+\b', '#888888')
+        # Listas y matrices
+        rule(r'[{}\[\]]', '#d19a66')
         # Números
         rule(r'\b\d+\.?\d*([eE][+-]?\d+)?\b', '#b5cea8')
-        # Operador de asignación →
-        rule(r'→', '#c678dd', bold=True)
-        # Operadores de comparación
-        rule(r'[≠≤≥]|!=|<=|>=', '#56b6c2')
-        # Comentarios REM y //
-        rule(r'(^\s*\d*\s*REM\b.*$|//.*$)', '#7f848e', italic=True)
+        # Operador de guardar y símbolos de la calculadora
+        rule(r'→|:=', '#c678dd', bold=True)
+        rule(r'[≠≤≥√²³⁻¹]|<=|>=|/=', '#56b6c2')
+        # Comentarios: © de la calculadora (y // por comodidad)
+        rule(r'(©.*$|//.*$)', '#7f848e', italic=True)
 
     def highlightBlock(self, text: str):
         for pattern, fmt in self._rules:
@@ -322,7 +308,7 @@ class PanelTIBasic(QWidget):
         lay_izq.setContentsMargins(0, 0, 0, 0)
         lay_izq.setSpacing(5)
 
-        grp_ed = QGroupBox("Programa TI-Basic")
+        grp_ed = QGroupBox("Programa TI-Basic (TI-Nspire)")
         lay_ed = QVBoxLayout(grp_ed)
 
         self._editor = _Editor()
@@ -335,15 +321,17 @@ class PanelTIBasic(QWidget):
         self._editor.setPlaceholderText(
             ":ClrHome\n:Disp \"Hola mundo\"\n:Pause"
         )
-        _Highlighter(self._editor.document())
+        # hay que guardar la referencia: si Python recolecta el
+        # resaltador, el coloreado desaparece sin dar ningún error
+        self._resaltador = _Highlighter(self._editor.document())
         lay_ed.addWidget(self._editor)
 
         # Fila de caracteres especiales
         lay_chars = QHBoxLayout()
         lay_chars.setSpacing(4)
         especiales = [
-            ("→", "→"), ("≤", "≤"), ("≥", "≥"), ("≠", "≠"),
-            ("√(", "√("), ("π", "π"), ("²", "²"), ("∞", "∞"),
+            ("→", "→"), ("≠", "≠"), ("≤", "≤"), ("≥", "≥"),
+            ("√(", "√("), ("π", "π"), ("²", "²"), ("©", "© "),
         ]
         for label, char in especiales:
             btn = QPushButton(label)
@@ -376,12 +364,12 @@ class PanelTIBasic(QWidget):
 
         btn_guardar = QPushButton("💾  Guardar")
         btn_guardar.setFixedHeight(34)
-        btn_guardar.setToolTip("Guardar programa como archivo .tib")
+        btn_guardar.setToolTip("Guardar el programa como archivo de texto")
         btn_guardar.clicked.connect(self._guardar_programa)
 
         btn_abrir = QPushButton("📂  Abrir")
         btn_abrir.setFixedHeight(34)
-        btn_abrir.setToolTip("Abrir un programa .tib guardado")
+        btn_abrir.setToolTip("Abrir un programa guardado")
         btn_abrir.clicked.connect(self._abrir_programa)
 
         lay_btn.addWidget(self._btn_run)
@@ -410,7 +398,7 @@ class PanelTIBasic(QWidget):
         lay_der = QVBoxLayout(der)
         lay_der.setContentsMargins(0, 0, 0, 0)
 
-        grp_pan = QGroupBox("Pantalla")
+        grp_pan = QGroupBox("Pantalla — se ejecuta en el PC, no en la calculadora")
         lay_pan = QVBoxLayout(grp_pan)
 
         lbl_modelo = QLabel("TI-Nspire CX CAS")
@@ -514,7 +502,7 @@ class PanelTIBasic(QWidget):
             return
         ruta, _ = QFileDialog.getSaveFileName(
             self, "Guardar programa TI-Basic", "",
-            "Programas TI-Basic (*.tib);;Archivos de texto (*.txt);;Todos los archivos (*)"
+            "Programa TI-Basic (*.txt);;Todos los archivos (*)"
         )
         if not ruta:
             return
@@ -527,7 +515,7 @@ class PanelTIBasic(QWidget):
     def _abrir_programa(self):
         ruta, _ = QFileDialog.getOpenFileName(
             self, "Abrir programa TI-Basic", "",
-            "Programas TI-Basic (*.tib);;Archivos de texto (*.txt);;Todos los archivos (*)"
+            "Programa TI-Basic (*.txt);;Todos los archivos (*)"
         )
         if not ruta:
             return

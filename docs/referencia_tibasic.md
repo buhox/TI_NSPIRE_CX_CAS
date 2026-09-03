@@ -1,86 +1,125 @@
-# Referencia TI-Basic
+# Referencia de TI-Basic (TI-Nspire)
 
-El intérprete (`calculadora/ti_basic.py`) ejecuta programas TI-Basic con dos
-estilos compatibles:
+El intérprete (`calculadora/ti_basic.py`) ejecuta el TI-Basic de la TI-Nspire
+CX / CX CAS: `Define … Func/Prgm`, `→` para guardar, bloques `EndIf`/`EndFor`,
+listas indexadas desde 1 y comentarios con `©`.
 
-- **TI-Nspire CX CAS** — sin números de línea, asignación con `→` o `:=`,
-  bloques `For ... EndFor`, `If ... EndIf`.
-- **TI-99/4A Extended Basic** — con números de línea, `LET`, `FOR/NEXT`,
-  `GOSUB/RETURN`.
+**Los programas se ejecutan en el PC, no en la calculadora.** Un `.tns` es un
+formato de documento que libtifiles trata como un bloque opaco: se puede
+transferir, pero no crear. Así que lo que escribas aquí no se puede subir a la
+calculadora; sirve para escribir, probar y depurar antes de teclearlo allí.
+Además la aritmética es la de Python, no la del CAS: los resultados numéricos
+coinciden, pero una expresión simbólica no se simplifica igual.
 
-## Asignación de variables
+## Definir funciones y programas
 
-| Estilo | Sintaxis | Ejemplo |
-|---|---|---|
-| TI-Nspire (flecha) | `expr → Var` | `5 → A` |
-| TI-Nspire (`:=`) | `Var := expr` | `A := 5` |
-| TI-99/4A | `LET Var = expr` | `LET A = 5` |
-| Implícita | `Var = expr` | `A = 5` |
+```
+Define f(x)=Func
+  Return x^2+1
+EndFunc
 
-## Entrada / salida
+Define saluda()=Prgm
+  Disp "hola"
+EndPrgm
 
-| Comando | Descripción |
+Define g(x)=2*x+1          © forma de una línea
+```
+
+Una `Func` devuelve un valor con `Return`; un `Prgm` no devuelve nada y se
+ejecuta por sus efectos. Si el código solo tiene definiciones, el panel ejecuta
+`main()` si existe, y si no el último `Prgm` definido.
+
+## Variables
+
+| Qué | Sintaxis |
 |---|---|
-| `PRINT` / `DISP` | Muestra texto y valores (separadores `;` y `,`) |
-| `INPUT` / `LINPUT` | Pide un valor al usuario (con mensaje opcional) |
-| `PROMPT` | Pide uno o más valores (`PROMPT A, B`) |
-| `OUTPUT` / `DISPLAY AT` | Salida en una posición dada |
-| `PAUSE` | Pausa hasta que el usuario presiona Enter |
-| `CLRHOME` / `CALL CLEAR` / `NEW` | Limpia la pantalla |
+| Guardar | `expr→var` · `var:=expr` |
+| Guardar en una lista | `valor→l[3]` |
+| Declarar local | `Local a,b,c` |
+| Borrar | `DelVar a,b` |
+
+Los nombres no distinguen mayúsculas de minúsculas: `Total`, `total` y `TOTAL`
+son la misma variable. Sin `Local`, una variable es global.
 
 ## Control de flujo
 
-| Estructura | Palabras clave |
+```
+If cond Then          If cond              For i,1,10,2        While cond
+  ...                   sentencia            ...                 ...
+ElseIf cond Then                            EndFor              EndWhile
+  ...
+Else                  Loop                  Try
+  ...                   ...                   ...
+EndIf                   Exit                Else
+                      EndLoop                 ...
+                                            EndTry
+```
+
+- `Exit` sale del bucle; `Cycle` pasa a la siguiente vuelta.
+- `Lbl nombre` y `Goto nombre` para saltos.
+- `Return [expr]` sale de la función; `Stop` termina el programa.
+- Dentro de `Try`, un error salta al `Else`. `ClrErr` limpia el error y
+  `PassErr` lo vuelve a lanzar.
+
+## Entrada y salida
+
+| Comando | Qué hace |
 |---|---|
-| Condicional | `IF ... THEN ... ELSE ... ENDIF` |
-| Bucle contador | `FOR ... NEXT` / `FOR ... ENDFOR` |
-| Bucle condicional | `WHILE ... ENDWHILE` (`WEND`) |
-| Bucle repetir | `REPEAT ... END` |
-| Salto | `GOTO` + etiqueta `LBL` |
-| Subrutina | `GOSUB` / `RETURN` |
-| Terminación | `STOP` / `BYE` / `RETURN` / `SUBEXIT` |
-
-## Datos y estructuras
-
-| Comando | Descripción |
-|---|---|
-| `DATA` / `READ` | Define y lee datos secuenciales |
-| `DIM var(n[,m])` | Declara un array de 1 o 2 dimensiones |
-| `DEF fn(x) = expr` | Define una función |
-| `CALL` | Llama a un subprograma (TI-99/4A) |
-| `RANDOMIZE [semilla]` | Inicializa el generador aleatorio |
-
-## Funciones matemáticas incorporadas
-
-- **Trigonometría**: `sin`, `cos`, `tan`, `asin`, `acos`, `atan` (`ATN`),
-  `sinh`, `cosh`, `tanh`
-- **Álgebra**: `sqrt` (`SQR`), `abs`, `log` (base 10), `ln`, `exp`,
-  `int` (parte entera), `iPart`, `frac`, `round`, `max`, `min`, `sgn`
-- **Aleatoriedad**: `rand` / `RND`, `randInt(a, b)`
-- **Cadenas**: `LEN`, `ASC`, `CHR`, `STR`, `VAL`, `SEG` (subcadena),
-  `RPT` (repetir), `POS` (buscar), `TAB`
-- **Constantes**: `pi` / `π`, `e`
+| `Disp expr[,expr…]` | Muestra los valores |
+| `Text expr` | Igual que `Disp` en este panel |
+| `Request "texto",var` | Pide un valor y lo evalúa como expresión |
+| `RequestStr "texto",var` | Pide un valor y lo guarda como cadena |
+| `Input [prompt,]var` | Como `Request` |
+| `Pause [expr]` | Muestra y espera |
+| `ClrIO` · `ClrHome` | Limpia la pantalla |
 
 ## Operadores
 
-| Notación TI | Significado |
+| Categoría | Símbolos |
 |---|---|
-| `^` | Potencia |
-| `=` | Igualdad (comparación) |
-| `≠` | Distinto (`!=`) |
-| `≤`, `≥` | Menor/mayor o igual |
-| `and`, `or`, `not`, `XOR` | Operadores lógicos |
+| Aritméticos | `+ - * / ^` · `√(x)` · `x²` |
+| Comparación | `= ≠ < > ≤ ≥` — ojo: `=` **compara**, para guardar se usa `→` |
+| Lógicos | `and or not xor` |
+| Cadenas | `&` concatena |
+
+## Listas, cadenas y matrices
+
+**Se indexan desde 1**, como en la calculadora, no desde 0.
+
+```
+{4,8,15}→l
+Disp l[1]              © 4
+Disp dim(l)            © 3
+99→l[2]                © {4,99,15}
+
+"Nspire"→s
+Disp s[1]              © N
+Disp mid(s,2,3)        © spi
+
+[[1,2][3,4]]→m
+Disp m[2,1]            © 3
+Disp m[1]              © {1,2}
+```
+
+## Funciones disponibles
+
+- **Números**: `abs root ln log exp int iPart fPart round floor ceiling sign
+  mod remain gcd lcm nCr nPr factorial approx`
+- **Trigonometría** (en radianes): `sin cos tan arcsin arccos arctan sinh cosh
+  tanh`. También se aceptan `sin⁻¹`, `cos⁻¹`, `tan⁻¹`.
+- **Listas**: `dim sum product mean max min augment sortA sortD left right`
+- **Cadenas**: `dim left right mid inString char ord`
+- **Otras**: `when(cond,a,b)` · `rand([n])` · `randInt(a,b[,n])`
+- **Constantes**: `pi` (o `π`), `e`, `true`, `false`, `undef`, `infinity` (`∞`)
 
 ## Comentarios
 
-Se ignoran las líneas que empiezan por `REM`, `//` o `'`.
+`©` comienza un comentario hasta el final de la línea (el panel también acepta
+`//`). El separador `:` permite varias sentencias en una línea.
 
-## Ejemplo
+## Lo que no está implementado
 
-```
-"Hola desde TI-Basic" → msg
-Disp msg
-For i, 1, 5
-  Disp i, i^2
-EndFor
-```
+No hay CAS simbólico (`solve`, `expand`, `factor`, `∫`, `d/dx`), ni gráficos,
+ni acceso a las variables del documento de la calculadora, ni `DispAt` con
+posicionamiento, ni bibliotecas `LibPub` compartidas entre documentos. Para
+álgebra simbólica están los paneles CAS y Gráficas, que usan SymPy.

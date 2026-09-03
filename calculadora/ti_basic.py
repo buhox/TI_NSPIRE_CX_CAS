@@ -1,902 +1,1023 @@
 # =============================================================================
-# INTÉRPRETE TI-BASIC / TI-BASIC EXTENDIDO
-# Compatible con TI-Nspire CX CAS y TI-99/4A Extended Basic
+# INTÉRPRETE DE TI-BASIC DE TI-NSPIRE
+#
+# Implementa el lenguaje de la TI-Nspire CX / CX CAS:
+#   Define f(x)=Func ... EndFunc      Define p()=Prgm ... EndPrgm
+#   Local · → (guardar) · If/Then/ElseIf/Else/EndIf · For/EndFor
+#   While/EndWhile · Loop/EndLoop · Exit · Cycle · Try/Else/EndTry
+#   Lbl/Goto · Return · Stop · Disp · Request · Pause · DelVar · ©
+#
+# Detalles del lenguaje que NO son los de Python y aquí se respetan:
+#   - Las listas y cadenas se indexan desde 1, no desde 0.
+#   - Los identificadores no distinguen mayúsculas de minúsculas.
+#   - `=` es comparación; para guardar se usa `→` (o `:=`).
+#   - El comentario es `©`.
+#
+# El programa se ejecuta en el PC, no en la calculadora: los resultados son de
+# Python, así que una expresión simbólica no se resuelve como lo haría el CAS.
 # =============================================================================
 from __future__ import annotations
 
-import re
 import math
 import random
+import re
 import threading
 from typing import Callable, Optional
 
 
-class _Stop(Exception):
-    def __init__(self, silent: bool = False):
-        self.silent = silent
-
-class _Return(Exception):
-    pass
-
-class _GotoInline(Exception):
-    def __init__(self, target: int):
-        self.target = target
+# ── Excepciones de control ────────────────────────────────────────────────────
 
 class TIBasicError(Exception):
-    pass
+    """Error del programa del usuario (equivale a un error de la calculadora)."""
 
 
-# ---------------------------------------------------------------------------
-# Wrapper para arrays: A(i) evaluable desde eval()
-# ---------------------------------------------------------------------------
-class _ArrayVar:
-    def __init__(self, data: list):
-        self.data = data
-
-    def __call__(self, *idx):
-        if len(idx) == 1:
-            return self.data[int(idx[0])]
-        return self.data[int(idx[0])][int(idx[1])]
-
-    def __len__(self): return len(self.data)
-    def __getitem__(self, i): return self.data[i]
-    def __setitem__(self, i, v): self.data[int(i)] = v
+class _Detener(Exception):
+    """Stop, o el usuario pulsó Detener."""
 
 
-# ---------------------------------------------------------------------------
-# Namespace matemático
-# ---------------------------------------------------------------------------
-def _sgn(x):
-    return 1 if x > 0 else (-1 if x < 0 else 0)
+class _Retornar(Exception):
+    def __init__(self, valor=None):
+        self.valor = valor
 
-def _pos(haystack: str, needle: str, start: int = 1) -> int:
-    idx = haystack.find(needle, start - 1)
+
+class _Salir(Exception):
+    """Exit"""
+
+
+class _Ciclo(Exception):
+    """Cycle"""
+
+
+class _Saltar(Exception):
+    def __init__(self, etiqueta: str):
+        self.etiqueta = etiqueta
+
+
+# ── Tipos del lenguaje ────────────────────────────────────────────────────────
+
+class TIList(list):
+    """
+    Lista de la Nspire: se indexa desde 1.
+    `l[1]` es el primer elemento; `l[0]` es un error, como en la calculadora.
+    """
+
+    def _idx(self, i):
+        if isinstance(i, slice):
+            return i
+        i = int(i)
+        if i < 1 or i > len(self):
+            raise TIBasicError(f"Índice {i} fuera de rango (1..{len(self)})")
+        return i - 1
+
+    def __getitem__(self, i):
+        if isinstance(i, tuple):        # m[1,2] es el elemento fila 1, columna 2
+            valor = self
+            for k in i:
+                valor = valor[k]
+            return valor
+        return list.__getitem__(self, self._idx(i))
+
+    def __setitem__(self, i, v):
+        if isinstance(i, tuple):
+            destino = self
+            for k in i[:-1]:
+                destino = destino[k]
+            destino[i[-1]] = v
+            return
+        # asignar más allá del final hace crecer la lista, como en la Nspire
+        if not isinstance(i, slice):
+            n = int(i)
+            if n > len(self):
+                self.extend([0] * (n - len(self)))
+                list.__setitem__(self, n - 1, v)
+                return
+        list.__setitem__(self, self._idx(i), v)
+
+    def __call__(self, i):
+        # en la Nspire l(1) y l[1] son equivalentes
+        return self[i]
+
+    def __repr__(self):
+        return "{" + ",".join(_formatear(v) for v in self) + "}"
+
+
+class TICadena(str):
+    """Cadena indexada desde 1 (mid/left/right son las funciones normales)."""
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return TICadena(str.__getitem__(self, i))
+        n = int(i)
+        if n < 1 or n > len(self):
+            raise TIBasicError(f"Índice {n} fuera de rango (1..{len(self)})")
+        return TICadena(str.__getitem__(self, n - 1))
+
+
+def _formatear(v) -> str:
+    """Convierte un valor al texto que mostraría la calculadora."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, TIList) or isinstance(v, list):
+        return "{" + ",".join(_formatear(x) for x in v) + "}"
+    if isinstance(v, float):
+        if math.isnan(v):
+            return "undef"
+        if math.isinf(v):
+            return "∞" if v > 0 else "-∞"
+        if v == int(v) and abs(v) < 1e14:
+            return str(int(v))
+        return f"{v:.12g}"
+    if isinstance(v, int):
+        return str(v)
+    return str(v)
+
+
+# ── Biblioteca de funciones ───────────────────────────────────────────────────
+
+def _dim(x):
+    return len(x)
+
+
+def _mid(s, inicio, cuenta=None):
+    s = str(s)
+    i = int(inicio) - 1
+    if i < 0:
+        raise TIBasicError("mid(): el inicio empieza en 1")
+    return TICadena(s[i:i + int(cuenta)] if cuenta is not None else s[i:])
+
+
+def _left(x, n=None):
+    if isinstance(x, list):
+        return TIList(x[:int(n)] if n is not None else x)
+    s = str(x)
+    return TICadena(s[:int(n)] if n is not None else s)
+
+
+def _right(x, n=None):
+    if isinstance(x, list):
+        return TIList(x[-int(n):] if n is not None else x)
+    s = str(x)
+    return TICadena(s[-int(n):] if n is not None else s)
+
+
+def _instring(origen, patron, inicio=1):
+    idx = str(origen).find(str(patron), int(inicio) - 1)
     return idx + 1 if idx >= 0 else 0
 
-def _seg(s: str, start: int, length: int) -> str:
-    return s[int(start) - 1: int(start) - 1 + int(length)]
 
-def _rpt(s: str, n) -> str:
-    return str(s) * int(n)
+def _when(cond, si_true, si_false=None, si_undef=None):
+    if cond is None:
+        return si_undef
+    return si_true if cond else si_false
 
-def _val(s) -> float:
-    try:
-        return float(str(s).strip())
-    except Exception:
-        return 0.0
 
-def _str(x) -> str:
-    if isinstance(x, float) and x == int(x):
-        return str(int(x))
-    return str(x)
+def _seq(expr_fn, var, low, high, paso=1):
+    # seq() se resuelve en el intérprete porque necesita evaluar una expresión;
+    # aquí solo se recibe ya convertido en función.
+    salida = TIList()
+    x = low
+    while (paso > 0 and x <= high) or (paso < 0 and x >= high):
+        salida.append(expr_fn(x))
+        x += paso
+    return salida
 
-_MATH_NS: dict = {
-    '__builtins__': {},
-    # Trigonometría
-    'sin': math.sin,  'cos': math.cos,  'tan': math.tan,
-    'asin': math.asin, 'acos': math.acos, 'atan': math.atan,
-    'ATN': math.atan,
-    'sinh': math.sinh, 'cosh': math.cosh, 'tanh': math.tanh,
-    # Álgebra
-    'sqrt': math.sqrt, 'SQR': math.sqrt,
-    'abs': abs,  'ABS': abs,
-    'log': math.log10, 'LOG': math.log10,
-    'ln': math.log,
-    'EXP': math.exp, 'exp': math.exp,
-    'int': lambda x: int(math.floor(x)), 'INT': lambda x: int(math.floor(x)),
-    'iPart': math.trunc,
-    'frac': lambda x: x - math.floor(x),
-    'round': round,
-    'max': max, 'MAX': max,
-    'min': min, 'MIN': min,
-    'SGN': _sgn, 'sgn': _sgn,
-    # Constantes
-    'pi': math.pi, 'PI': math.pi, 'e': math.e,
-    # Aleatoriedad
-    'rand': random.random,
-    'RND': random.random,
-    'randInt': lambda a, b: random.randint(int(a), int(b)),
-    # Lógica
-    'not': lambda x: int(not bool(x)),
-    'True': 1, 'False': 0,
-    # Cadenas
-    'LEN': len,  'len': len,
-    'ASC': lambda s: ord(str(s)[0]) if s else 0,
-    'CHR': chr,
-    'STR': _str,
-    'VAL': _val, 'val': _val,
-    'SEG': _seg,
-    'RPT': _rpt,
-    'POS': _pos,
-    # Misc
-    'TAB': lambda n: ' ' * int(n),
+
+def _augment(a, b):
+    return TIList(list(a) + list(b))
+
+
+def _sortd(l):
+    return TIList(sorted(l, reverse=True))
+
+
+def _signo(x):
+    return 1 if x > 0 else (-1 if x < 0 else 0)
+
+
+def _mod(a, b):
+    return a - b * math.floor(a / b) if b else a
+
+
+def _ncr(n, r):
+    return math.comb(int(n), int(r))
+
+
+def _npr(n, r):
+    return math.perm(int(n), int(r))
+
+
+def _root(x, n=2):
+    return x ** (1.0 / n)
+
+
+def _exp(x):
+    return math.exp(x)
+
+
+def _raiz(x):
+    if isinstance(x, (int, float)) and x < 0:
+        raise TIBasicError("√ de un número negativo (aquí no hay aritmética compleja)")
+    return math.sqrt(x)
+
+
+def _redondear(x, n=None):
+    return round(x, int(n)) if n is not None else round(x)
+
+
+def _entero(x):
+    return int(math.floor(x))
+
+
+def _fpart(x):
+    return x - math.trunc(x)
+
+
+def _xor(a, b):
+    return bool(a) != bool(b)
+
+
+_BIBLIOTECA: dict = {
+    "__builtins__": {},
+    # trigonometría (la Nspire trabaja en radianes salvo que se diga otra cosa)
+    "sin": math.sin, "cos": math.cos, "tan": math.tan,
+    "sin⁻¹": math.asin, "cos⁻¹": math.acos, "tan⁻¹": math.atan,
+    "arcsin": math.asin, "arccos": math.acos, "arctan": math.atan,
+    "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
+    # aritmética
+    "abs": abs, "sqrt": _raiz, "root": _root,
+    "ln": math.log, "log": math.log10, "e^": _exp, "exp": _exp,
+    "int": _entero, "ipart": math.trunc, "fpart": _fpart,
+    "round": _redondear, "floor": lambda x: int(math.floor(x)),
+    "ceiling": lambda x: int(math.ceil(x)), "sign": _signo,
+    "mod": _mod, "remain": lambda a, b: math.fmod(a, b),
+    "gcd": lambda a, b: math.gcd(int(a), int(b)),
+    "lcm": lambda a, b: math.lcm(int(a), int(b)),
+    "ncr": _ncr, "npr": _npr, "factorial": lambda n: math.factorial(int(n)),
+    "max": max, "min": min,
+    "sum": lambda l: sum(l), "product": lambda l: math.prod(l),
+    "mean": lambda l: sum(l) / len(l),
+    "approx": float,
+    # listas y cadenas
+    "dim": _dim, "augment": _augment,
+    "left": _left, "right": _right, "mid": _mid,
+    "instring": _instring, "sortd": _sortd,
+    "sorta": lambda l: TIList(sorted(l)),
+    "char": lambda n: TICadena(chr(int(n))),
+    "ord": lambda s: ord(str(s)[0]) if s else 0,
+    "when": _when,
+    # aleatoriedad
+    "rand": lambda n=None: (TIList([random.random() for _ in range(int(n))])
+                            if n is not None else random.random()),
+    "randint": lambda a, b, n=None: (
+        TIList([random.randint(int(a), int(b)) for _ in range(int(n))])
+        if n is not None else random.randint(int(a), int(b))),
+    # lógica
+    "not": lambda x: not bool(x),
+    "xor": _xor,
+    # constantes
+    "pi": math.pi, "e": math.e, "true": True, "false": False,
+    "undef": None, "infinity": math.inf,
+    # ayudas internas del traductor
+    "_tilist": TIList, "_ticadena": TICadena,
 }
 
 
-def _normalizar(expr: str) -> str:
-    """Convierte sintaxis TI-Basic a Python evaluable."""
-    s = expr
-    # Funciones con $ (TI-99/4A) → sin $ para que Python las acepte
-    s = re.sub(r'\b(CHR|STR|SEG|RPT)\$\s*\(', r'\1(', s, flags=re.IGNORECASE)
-    s = s.replace('^', '**')
-    s = s.replace('√(', 'sqrt(')
-    s = s.replace('√', 'sqrt')
-    s = s.replace('π', 'pi')
-    s = s.replace('≠', '!=')
-    s = s.replace('≤', '<=')
-    s = s.replace('≥', '>=')
-    # := (TI-Nspire) → == para comparación (en contexto de eval)
-    s = s.replace(':=', '==__ASSIGN__')   # placeholder para no confundir
-    # = suelto → == (comparación)
-    s = re.sub(r'(?<![!<>=])=(?!=)', '==', s)
-    s = s.replace('==__ASSIGN__', '')  # quitar placeholder (ya se evaluó el lado derecho)
-    # Operadores lógicos
-    s = re.sub(r'\bXOR\b', '!=',  s, flags=re.IGNORECASE)
-    s = re.sub(r'\band\b', ' and ', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bor\b',  ' or ',  s, flags=re.IGNORECASE)
+# ── Traducción de expresiones Nspire → Python ─────────────────────────────────
+
+_RE_CADENA = re.compile(r'"[^"]*"')
+_RE_IDENT  = re.compile(r'\b[A-Za-z_][A-Za-z0-9_]*\b')
+_RE_IGUAL  = re.compile(r'(?<![!<>=≠≤≥])=(?!=)')
+
+# palabras que en Python significan otra cosa o no deben tocarse
+_RESERVADAS_PY = {
+    "and", "or", "not", "if", "else", "in", "is", "none", "true", "false",
+    "lambda", "for", "while",
+}
+
+
+def _proteger_cadenas(s: str) -> tuple[str, list[str]]:
+    """Saca los literales de cadena para que las sustituciones no los toquen."""
+    guardadas: list[str] = []
+
+    def _sacar(m):
+        guardadas.append(m.group(0))
+        return f"\x00{len(guardadas) - 1}\x00"
+
+    return _RE_CADENA.sub(_sacar, s), guardadas
+
+
+def _restaurar_cadenas(s: str, guardadas: list[str]) -> str:
+    for i, lit in enumerate(guardadas):
+        s = s.replace(f"\x00{i}\x00", f"_ticadena({lit})")
     return s
 
 
-# ---------------------------------------------------------------------------
-# Intérprete
-# ---------------------------------------------------------------------------
+def _convertir_agrupadores(s: str) -> str:
+    """
+    `{1,2,3}` → `_tilist([1,2,3])` y `[[1,2][3,4]]` → matriz de TIList,
+    distinguiendo un corchete de literal de uno de subíndice.
+    """
+    s = re.sub(r'\]\s*\[', '],[', s)      # separador de filas de matriz
+    salida: list[str] = []
+    pila: list[str] = []
+    anterior = ''
+    for c in s:
+        if c == '{':
+            pila.append('llave')
+            salida.append('_tilist([')
+        elif c == '}':
+            if pila and pila[-1] == 'llave':
+                pila.pop()
+                salida.append('])')
+            else:
+                salida.append(c)
+        elif c == '[':
+            if anterior and (anterior.isalnum() or anterior in '_)]'):
+                pila.append('sub')        # a[1] es un subíndice
+                salida.append('[')
+            else:
+                pila.append('lit')        # [[1,2],[3,4]] es un literal
+                salida.append('_tilist([')
+        elif c == ']':
+            salida.append(']' if (pila and pila.pop() == 'sub') else '])')
+        else:
+            salida.append(c)
+        if not c.isspace():
+            anterior = c
+    return ''.join(salida)
+
+
+def traducir(expr: str) -> str:
+    """Convierte una expresión de TI-Basic de Nspire en una de Python."""
+    s, cadenas = _proteger_cadenas(expr)
+
+    # funciones trigonométricas inversas escritas con el superíndice de la calculadora
+    for base in ("sin", "cos", "tan"):
+        s = s.replace(f"{base}⁻¹", f"arc{base}")
+
+    # símbolos de la calculadora
+    s = (s.replace("≠", "!=").replace("≤", "<=").replace("≥", ">=")
+          .replace("π", "pi").replace("∞", "infinity")
+          .replace("√", "sqrt").replace("−", "-"))
+    s = s.replace("²", "**2").replace("³", "**3")
+    s = s.replace("&", "+")               # concatenación de cadenas
+    s = s.replace("^", "**")
+
+    # `=` es comparación en Nspire (para guardar se usa →, que se trata aparte)
+    s = _RE_IGUAL.sub("==", s)
+
+    s = _convertir_agrupadores(s)
+
+    # los identificadores no distinguen mayúsculas
+    def _bajar(m):
+        palabra = m.group(0)
+        return palabra if palabra.lower() in _RESERVADAS_PY else palabra.lower()
+
+    s = _RE_IDENT.sub(_bajar, s)
+
+    return _restaurar_cadenas(s, cadenas)
+
+
+# ── Ámbito de variables ───────────────────────────────────────────────────────
+
+class _Ambito:
+    """Un marco de variables. Los `Local` viven aquí; el resto va a globales."""
+
+    def __init__(self, globales: dict, locales: Optional[dict] = None):
+        self.globales = globales
+        self.locales = locales if locales is not None else {}
+        self.declaradas: set[str] = set()
+
+    def declarar(self, nombre: str):
+        self.declaradas.add(nombre)
+        self.locales.setdefault(nombre, None)
+
+    def obtener(self, nombre: str):
+        if nombre in self.declaradas:
+            return self.locales.get(nombre)
+        if nombre in self.globales:
+            return self.globales[nombre]
+        raise TIBasicError(f"Variable «{nombre}» sin definir")
+
+    def asignar(self, nombre: str, valor):
+        if nombre in self.declaradas:
+            self.locales[nombre] = valor
+        else:
+            self.globales[nombre] = valor
+
+    def borrar(self, nombre: str):
+        self.declaradas.discard(nombre)
+        self.locales.pop(nombre, None)
+        self.globales.pop(nombre, None)
+
+    def como_dict(self) -> dict:
+        d = dict(self.globales)
+        for k in self.declaradas:
+            d[k] = self.locales.get(k)
+        return d
+
+
+# ── Utilidades de análisis ────────────────────────────────────────────────────
+
+def _clave(sentencia: str) -> str:
+    m = re.match(r'\s*([A-Za-z_][A-Za-z0-9_]*)', sentencia)
+    return m.group(1).lower() if m else ""
+
+
+def _partir_fuera_de_cadenas(s: str, sep: str) -> list[str]:
+    """Parte por `sep` ignorando lo que haya dentro de comillas."""
+    partes, actual, en_cadena, i = [], [], False, 0
+    while i < len(s):
+        c = s[i]
+        if c == '"':
+            en_cadena = not en_cadena
+            actual.append(c)
+        elif not en_cadena and s.startswith(sep, i):
+            partes.append(''.join(actual))
+            actual = []
+            i += len(sep)
+            continue
+        else:
+            actual.append(c)
+        i += 1
+    partes.append(''.join(actual))
+    return partes
+
+
+def _partir_argumentos(s: str) -> list[str]:
+    """Parte por comas respetando paréntesis, corchetes, llaves y comillas."""
+    args, actual, prof, en_cadena = [], [], 0, False
+    for c in s:
+        if c == '"':
+            en_cadena = not en_cadena
+            actual.append(c)
+        elif en_cadena:
+            actual.append(c)
+        elif c in '([{':
+            prof += 1
+            actual.append(c)
+        elif c in ')]}':
+            prof -= 1
+            actual.append(c)
+        elif c == ',' and prof == 0:
+            args.append(''.join(actual).strip())
+            actual = []
+        else:
+            actual.append(c)
+    if ''.join(actual).strip():
+        args.append(''.join(actual).strip())
+    return args
+
+
+# ── Intérprete ────────────────────────────────────────────────────────────────
+
 class TIBasicInterpreter:
     """
-    Intérprete TI-Basic compatible con:
-    - TI-Nspire CX CAS  (sin números de línea, →, :=, For()/End)
-    - TI-99/4A Extended (números de línea, LET, FOR/NEXT, GOSUB)
+    Intérprete de TI-Basic de TI-Nspire.
+
+    Interfaz que usa el panel:
+        set_callbacks(salida, entrada, limpiar)
+        ejecutar(codigo)
+        detener()
     """
 
+    PROFUNDIDAD_MAX = 60
+
     def __init__(self):
-        self._vars:   dict[str, object] = {}
-        self._strs:   dict[str, str]    = {}
-        self._lists:  dict[str, list]   = {}
-        self._arrays: dict[str, list]   = {}
-        self._defs:   dict[str, tuple]  = {}
-        self._data:   list              = []
-        self._data_ptr: int             = 0
-        self._output_cb:  Optional[Callable[[str], None]] = None
-        self._input_cb:   Optional[Callable[[str], str]]  = None
-        self._clrhome_cb: Optional[Callable[[], None]]    = None
-        self._stop_flag = threading.Event()
-        self._gosub_stack: list[int] = []
-        self._line_num_map: dict[int, int] = {}
+        self._globales: dict = {}
+        self._funcs: dict[str, tuple] = {}     # nombre → (params, cuerpo, es_func)
+        self._salida_cb:  Optional[Callable[[str], None]] = None
+        self._entrada_cb: Optional[Callable[[str], str]]  = None
+        self._limpiar_cb: Optional[Callable[[], None]]    = None
+        self._parar = threading.Event()
+        self._profundidad = 0
+        self._ultimo_error = ""
+
+    # ── Interfaz del panel ────────────────────────────────────────────────────
 
     def set_callbacks(self, output_cb, input_cb, clrhome_cb=None):
-        self._output_cb  = output_cb
-        self._input_cb   = input_cb
-        self._clrhome_cb = clrhome_cb
+        self._salida_cb  = output_cb
+        self._entrada_cb = input_cb
+        self._limpiar_cb = clrhome_cb
 
     def detener(self):
-        self._stop_flag.set()
+        self._parar.set()
 
-    # ── I/O ──────────────────────────────────────────────────────────────────
+    # ── Entrada / salida ──────────────────────────────────────────────────────
 
-    def _emit(self, text: str):
-        if self._output_cb:
-            self._output_cb(str(text))
+    def _mostrar(self, texto: str):
+        if self._salida_cb:
+            self._salida_cb(str(texto))
 
-    def _pedir(self, prompt: str) -> str:
-        return self._input_cb(prompt) if self._input_cb else ""
+    def _preguntar(self, prompt: str) -> str:
+        return self._entrada_cb(prompt) if self._entrada_cb else ""
 
     # ── Evaluación ────────────────────────────────────────────────────────────
 
-    def _ns(self) -> dict:
-        ns = dict(_MATH_NS)
-        ns.update(self._vars)
-        ns.update(self._strs)
-        for k, v in self._lists.items():
-            ns[k] = v
-        for k, v in self._arrays.items():
-            ns[k] = _ArrayVar(v)     # callable wrapper: A(i) funciona en eval()
-        for fname, (param, expr) in self._defs.items():
-            p = param
-            e = expr
-            ns[fname] = eval(f'lambda {p}: {e}', ns)
+    def _espacio_nombres(self, ambito: _Ambito) -> dict:
+        ns = dict(_BIBLIOTECA)
+        for nombre, (params, cuerpo, es_func) in self._funcs.items():
+            ns[nombre] = self._crear_invocable(nombre, params, cuerpo, es_func)
+        ns.update(ambito.como_dict())
         return ns
 
-    def _eval(self, expr: str):
-        s = expr.strip()
-        if s.startswith('"') and s.endswith('"'):
-            return s[1:-1]
-        s = _normalizar(s)
+    def _evaluar(self, expr: str, ambito: _Ambito):
+        texto = expr.strip()
+        if not texto:
+            return None
+        codigo = traducir(texto)
         try:
-            return eval(s, self._ns())
+            valor = eval(codigo, self._espacio_nombres(ambito))
+        except TIBasicError:
+            raise
+        except (_Detener, _Retornar):
+            raise
+        except ZeroDivisionError:
+            raise TIBasicError(f"División entre cero en «{texto}»")
+        except NameError as exc:
+            falta = str(exc).split("'")[1] if "'" in str(exc) else "?"
+            raise TIBasicError(f"«{falta}» no está definido")
         except Exception as exc:
-            raise TIBasicError(f"Error en «{expr}»: {exc}")
+            raise TIBasicError(f"Error en «{texto}»: {exc}")
+        if isinstance(valor, str) and not isinstance(valor, TICadena):
+            valor = TICadena(valor)
+        if type(valor) is list:
+            valor = TIList(valor)
+        return valor
 
-    def _fmt(self, val) -> str:
-        if isinstance(val, bool):
-            return "1" if val else "0"
-        if isinstance(val, int):
-            return str(val)
-        if isinstance(val, float):
-            if val == int(val) and abs(val) < 1e15:
-                return str(int(val))
-            return f"{val:.10g}"
-        if isinstance(val, list):
-            return "{" + ",".join(self._fmt(v) for v in val) + "}"
-        return str(val)
+    # ── Guardar (operador →) ──────────────────────────────────────────────────
 
-    # ── Parseo ────────────────────────────────────────────────────────────────
-
-    def _parsear(self, codigo: str) -> list[str]:
-        stmts: list[str] = []
-        self._line_num_map = {}
-
-        for raw in codigo.splitlines():
-            m = re.match(r'^(\d+)\s+(.*)', raw.strip())
-            if m:
-                line_num = int(m.group(1))
-                self._line_num_map[line_num] = len(stmts)
-                raw = m.group(2)
-
-            # Dividir por ':' respetando cadenas y ':=' (operador de asignación)
-            current: list[str] = []
-            in_str = False
-            i_ch = 0
-            while i_ch < len(raw):
-                c = raw[i_ch]
-                if c == '"':
-                    in_str = not in_str
-                    current.append(c)
-                elif c == ':' and not in_str:
-                    # ':=' es asignación (TI-Nspire), no separador de sentencias
-                    if i_ch + 1 < len(raw) and raw[i_ch + 1] == '=':
-                        current.append(':=')
-                        i_ch += 2
-                        continue
-                    s = ''.join(current).strip()
-                    if s:
-                        stmts.append(s)
-                    current = []
+    def _guardar(self, destino: str, valor, ambito: _Ambito):
+        destino = destino.strip()
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\s*\[(.+)\]$', destino)
+        if m:
+            nombre = m.group(1).lower()
+            indices = [self._evaluar(a, ambito) for a in _partir_argumentos(m.group(2))]
+            contenedor = ambito.obtener(nombre)
+            try:
+                if len(indices) == 1:
+                    contenedor[indices[0]] = valor
                 else:
-                    current.append(c)
-                i_ch += 1
-            s = ''.join(current).strip()
-            if s:
-                stmts.append(s)
+                    destino_fila = contenedor[indices[0]]
+                    destino_fila[indices[1]] = valor
+            except TIBasicError:
+                raise
+            except Exception as exc:
+                raise TIBasicError(f"No se pudo guardar en «{destino}»: {exc}")
+            return
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', destino):
+            raise TIBasicError(f"«{destino}» no es un destino válido para →")
+        ambito.asignar(destino.lower(), valor)
 
-        # Pre-procesar DATA
-        self._data = []
-        self._data_ptr = 0
-        for st in stmts:
-            if self._kw(st) == 'DATA':
-                for val in self._split_args(st[4:].strip()):
-                    v = val.strip()
-                    if v.startswith('"') and v.endswith('"'):
-                        self._data.append(v[1:-1])
-                    else:
-                        try:
-                            self._data.append(float(v))
-                        except Exception:
-                            self._data.append(v)
+    # ── Preparación del código ────────────────────────────────────────────────
 
-        return stmts
+    def _partir(self, codigo: str) -> list[str]:
+        """Convierte el texto en una lista de sentencias, sin comentarios."""
+        sentencias: list[str] = []
+        for linea in codigo.splitlines():
+            # comentarios: © de la calculadora y // por comodidad
+            sin_com, cadenas = _proteger_cadenas(linea)
+            for marca in ("©", "//"):
+                pos = sin_com.find(marca)
+                if pos >= 0:
+                    sin_com = sin_com[:pos]
+            linea = _restaurar_cadenas(sin_com, cadenas)
+            linea = re.sub(r'_ticadena\((".*?")\)', r'\1', linea)
+            linea = linea.strip()
+            if not linea:
+                continue
+            # `:` separa sentencias, pero `:=` es asignación
+            linea = linea.replace(":=", "\x01")
+            for trozo in _partir_fuera_de_cadenas(linea, ":"):
+                trozo = trozo.replace("\x01", ":=").strip()
+                if trozo:
+                    sentencias.append(trozo)
+        return sentencias
 
-    def _kw(self, line: str) -> str:
-        m = re.match(r'^([A-Za-z_][A-Za-z0-9_$]*)', line.strip())
-        return m.group(1).upper() if m else ""
+    def _extraer_definiciones(self, sentencias: list[str]) -> list[str]:
+        """Registra los Define y devuelve las sentencias de nivel superior."""
+        sueltas: list[str] = []
+        i = 0
+        while i < len(sentencias):
+            st = sentencias[i]
+            m = re.match(
+                r'^\s*Define\s+(?:LibPub\s+|LibPriv\s+)?'
+                r'([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*=\s*(.*)$',
+                st, re.IGNORECASE)
+            if not m:
+                sueltas.append(st)
+                i += 1
+                continue
 
-    # ── Tabla de saltos ───────────────────────────────────────────────────────
+            nombre = m.group(1).lower()
+            params = [p.strip().lower() for p in m.group(2).split(',') if p.strip()]
+            resto = m.group(3).strip()
 
-    def _construir_mapa(self, stmts: list[str]):
-        stack: list[tuple[str, int]] = []
-        end_map:      dict[int, int] = {}
-        else_map:     dict[int, int] = {}
-        else_end_map: dict[int, int] = {}
-        loop_map:     dict[int, int] = {}
+            if resto.lower() in ("func", "prgm"):
+                es_func = resto.lower() == "func"
+                cierre = "endfunc" if es_func else "endprgm"
+                apertura = resto.lower()
+                cuerpo: list[str] = []
+                nivel = 1
+                i += 1
+                while i < len(sentencias):
+                    actual = sentencias[i]
+                    clave = _clave(actual)
+                    if clave == apertura:
+                        nivel += 1
+                    elif clave == cierre:
+                        nivel -= 1
+                        if nivel == 0:
+                            break
+                    cuerpo.append(actual)
+                    i += 1
+                if i >= len(sentencias):
+                    raise TIBasicError(
+                        f"Falta {cierre.capitalize()} para Define {nombre}()")
+                i += 1
+                self._funcs[nombre] = (params, cuerpo, es_func)
+            else:
+                # Define f(x)=expresión  — función de una línea
+                self._funcs[nombre] = (params, [f"Return {resto}"], True)
+                i += 1
+        return sueltas
 
-        for i, line in enumerate(stmts):
-            kw    = self._kw(line)
-            upper = line.strip().upper()
+    # ── Mapa de bloques ───────────────────────────────────────────────────────
 
-            if kw in ('FOR', 'WHILE', 'REPEAT'):
-                stack.append((kw, i))
-            elif kw == 'IF':
-                j = i + 1
-                while j < len(stmts) and not stmts[j].strip():
-                    j += 1
-                if j < len(stmts) and self._kw(stmts[j]) == 'THEN':
-                    stack.append(('IF', i))
-            elif upper == 'ELSE':
-                for k in range(len(stack) - 1, -1, -1):
-                    if stack[k][0] == 'IF':
-                        else_map[stack[k][1]] = i
-                        break
-            elif kw in ('END', 'NEXT', 'SUBEND', 'WEND',
-                        'ENDWHILE', 'ENDFOR', 'ENDLOOP', 'ENDIF'):
-                if stack:
-                    entry_kw, start = stack.pop()
-                    end_map[start] = i
-                    if entry_kw in ('FOR', 'WHILE', 'REPEAT'):
-                        loop_map[i] = start
+    def _mapear(self, sentencias: list[str]) -> dict:
+        fin: dict[int, int] = {}
+        abre: dict[int, int] = {}
+        alt: dict[int, int] = {}
+        rescate: dict[int, int] = {}
+        etiquetas: dict[str, int] = {}
+        pila: list[list] = []
 
-        for if_idx, else_idx in else_map.items():
-            if if_idx in end_map:
-                else_end_map[else_idx] = end_map[if_idx]
+        for i, st in enumerate(sentencias):
+            clave = _clave(st)
+            if clave == "if" and re.search(r'\bthen\s*$', st, re.IGNORECASE):
+                pila.append(["if", i, [i]])
+            elif clave == "for":
+                pila.append(["for", i, []])
+            elif clave == "while":
+                pila.append(["while", i, []])
+            elif clave == "loop":
+                pila.append(["loop", i, []])
+            elif clave == "try":
+                pila.append(["try", i, []])
+            elif clave in ("elseif", "else"):
+                if not pila:
+                    raise TIBasicError(f"{st!r} sin bloque que lo contenga")
+                tipo, apertura, ramas = pila[-1]
+                if tipo == "try" and clave == "else":
+                    rescate[apertura] = i
+                elif tipo == "if":
+                    alt[ramas[-1]] = i
+                    ramas.append(i)
+                else:
+                    raise TIBasicError(f"{clave.capitalize()} inesperado")
+            elif clave in ("endif", "endfor", "endwhile", "endloop", "endtry"):
+                if not pila:
+                    raise TIBasicError(f"{st!r} sin apertura")
+                tipo, apertura, ramas = pila.pop()
+                esperado = {"if": "endif", "for": "endfor", "while": "endwhile",
+                            "loop": "endloop", "try": "endtry"}[tipo]
+                if clave != esperado:
+                    raise TIBasicError(
+                        f"Se esperaba {esperado.capitalize()} y hay {st!r}")
+                fin[apertura] = i
+                abre[i] = apertura
+                if tipo == "if":
+                    alt[ramas[-1]] = i
+                    for rama in ramas:      # ElseIf/Else también saltan al EndIf
+                        fin[rama] = i
+                if tipo == "try":
+                    rescate.setdefault(apertura, i)
+                    # si el cuerpo terminó sin error, su Else salta al EndTry
+                    if rescate[apertura] != i:
+                        fin[rescate[apertura]] = i
+            elif clave == "lbl":
+                etiqueta = st.split(None, 1)[1].strip().lower() if len(st.split(None, 1)) > 1 else ""
+                if not etiqueta:
+                    raise TIBasicError("Lbl sin nombre")
+                etiquetas[etiqueta] = i
 
-        # Conjunto de posiciones que cierran un bloque (no terminan el programa)
-        block_end_set: set[int] = set(end_map.values())
+        if pila:
+            tipo, apertura, _ = pila[-1]
+            falta = {"if": "EndIf", "for": "EndFor", "while": "EndWhile",
+                     "loop": "EndLoop", "try": "EndTry"}[tipo]
+            raise TIBasicError(f"Falta {falta} (bloque abierto en «{sentencias[apertura]}»)")
 
-        return end_map, else_map, else_end_map, loop_map, block_end_set
+        return {"fin": fin, "abre": abre, "alt": alt,
+                "rescate": rescate, "etiquetas": etiquetas}
 
-    # ── Ejecución ─────────────────────────────────────────────────────────────
+    # ── Bucle de ejecución ────────────────────────────────────────────────────
+
+    def _correr(self, sentencias: list[str], mapa: dict, ambito: _Ambito):
+        pc = 0
+        n = len(sentencias)
+        pila_bucles: list[int] = []
+        estados_for: dict[int, tuple] = {}
+        pila_try: list[tuple[int, int]] = []
+
+        while pc < n:
+            if self._parar.is_set():
+                raise _Detener()
+            try:
+                pc = self._sentencia(sentencias, pc, mapa, ambito,
+                                     pila_bucles, estados_for, pila_try)
+            except _Saltar as salto:
+                destino = mapa["etiquetas"].get(salto.etiqueta)
+                if destino is None:
+                    raise TIBasicError(f"Lbl «{salto.etiqueta}» no existe")
+                pila_bucles.clear()
+                estados_for.clear()
+                pc = destino + 1
+            except TIBasicError as err:
+                if not pila_try:
+                    raise
+                _apertura, rescate = pila_try.pop()
+                self._ultimo_error = str(err)
+                ambito.globales["errcode"] = 1
+                pc = rescate + 1
+
+    def _sentencia(self, sentencias, pc, mapa, ambito,
+                   pila_bucles, estados_for, pila_try) -> int:
+        st = sentencias[pc]
+        clave = _clave(st)
+        resto = st[len(clave):].strip() if clave else st
+
+        # ── Declaraciones ─────────────────────────────────────────────────────
+        if clave == "local":
+            for nombre in _partir_argumentos(resto):
+                ambito.declarar(nombre.strip().lower())
+            return pc + 1
+
+        if clave == "delvar":
+            for nombre in _partir_argumentos(resto):
+                ambito.borrar(nombre.strip().lower())
+            return pc + 1
+
+        # ── Salida ────────────────────────────────────────────────────────────
+        if clave in ("disp", "text", "output"):
+            if not resto:
+                self._mostrar("")
+            else:
+                partes = [_formatear(self._evaluar(a, ambito))
+                          for a in _partir_argumentos(resto)]
+                self._mostrar(" ".join(partes))
+            return pc + 1
+
+        if clave in ("clrio", "clrhome"):
+            if self._limpiar_cb:
+                self._limpiar_cb()
+            return pc + 1
+
+        if clave == "pause":
+            if resto:
+                self._mostrar(_formatear(self._evaluar(resto, ambito)))
+            self._preguntar("Pause — pulsa Aceptar para continuar")
+            return pc + 1
+
+        # ── Entrada ───────────────────────────────────────────────────────────
+        if clave in ("request", "requeststr", "input", "inputstr"):
+            args = _partir_argumentos(resto)
+            if not args:
+                raise TIBasicError(f"{clave.capitalize()} necesita una variable")
+            if len(args) == 1:
+                prompt, destino = f"{args[0].strip()}?", args[0].strip()
+            else:
+                prompt = str(self._evaluar(args[0], ambito))
+                destino = args[1].strip()
+            texto = self._preguntar(prompt)
+            if clave in ("requeststr", "inputstr"):
+                valor = TICadena(texto)
+            else:
+                try:
+                    valor = self._evaluar(texto, ambito) if texto.strip() else 0
+                except TIBasicError:
+                    valor = TICadena(texto)
+            self._guardar(destino, valor, ambito)
+            return pc + 1
+
+        # ── Condicionales ─────────────────────────────────────────────────────
+        if clave == "if":
+            if re.search(r'\bthen\s*$', st, re.IGNORECASE):
+                return self._resolver_if(sentencias, pc, mapa, ambito)
+            # forma corta: `If cond` y la sentencia siguiente es el cuerpo
+            cond = self._evaluar(resto, ambito)
+            return pc + 1 if cond else pc + 2
+
+        if clave in ("elseif", "else"):
+            # se llega aquí al terminar una rama tomada: saltar al EndIf
+            return mapa["fin"].get(pc, pc) + 1
+
+        if clave == "endif":
+            return pc + 1
+
+        # ── Bucles ────────────────────────────────────────────────────────────
+        if clave == "for":
+            args = _partir_argumentos(resto)
+            if len(args) < 3:
+                raise TIBasicError("For necesita variable, inicio y fin")
+            var = args[0].strip().lower()
+            if pc not in estados_for:
+                inicio = self._evaluar(args[1], ambito)
+                limite = self._evaluar(args[2], ambito)
+                paso = self._evaluar(args[3], ambito) if len(args) > 3 else 1
+                if paso == 0:
+                    raise TIBasicError("El paso de For no puede ser 0")
+                estados_for[pc] = (limite, paso)
+                ambito.asignar(var, inicio)
+                pila_bucles.append(pc)
+            limite, paso = estados_for[pc]
+            actual = ambito.obtener(var)
+            if (paso > 0 and actual > limite) or (paso < 0 and actual < limite):
+                estados_for.pop(pc, None)
+                if pila_bucles and pila_bucles[-1] == pc:
+                    pila_bucles.pop()
+                return mapa["fin"][pc] + 1
+            return pc + 1
+
+        if clave == "endfor":
+            apertura = mapa["abre"][pc]
+            args = _partir_argumentos(sentencias[apertura][3:].strip())
+            var = args[0].strip().lower()
+            _limite, paso = estados_for[apertura]
+            ambito.asignar(var, ambito.obtener(var) + paso)
+            return apertura
+
+        if clave == "while":
+            if self._evaluar(resto, ambito):
+                if not pila_bucles or pila_bucles[-1] != pc:
+                    pila_bucles.append(pc)
+                return pc + 1
+            if pila_bucles and pila_bucles[-1] == pc:
+                pila_bucles.pop()
+            return mapa["fin"][pc] + 1
+
+        if clave == "endwhile":
+            return mapa["abre"][pc]
+
+        if clave == "loop":
+            if not pila_bucles or pila_bucles[-1] != pc:
+                pila_bucles.append(pc)
+            return pc + 1
+
+        if clave == "endloop":
+            return mapa["abre"][pc]
+
+        if clave == "exit":
+            if not pila_bucles:
+                raise TIBasicError("Exit fuera de un bucle")
+            apertura = pila_bucles.pop()
+            estados_for.pop(apertura, None)
+            return mapa["fin"][apertura] + 1
+
+        if clave == "cycle":
+            if not pila_bucles:
+                raise TIBasicError("Cycle fuera de un bucle")
+            return mapa["fin"][pila_bucles[-1]]
+
+        # ── Try ───────────────────────────────────────────────────────────────
+        if clave == "try":
+            pila_try.append((pc, mapa["rescate"].get(pc, mapa["fin"][pc])))
+            return pc + 1
+
+        if clave == "endtry":
+            if pila_try and pila_try[-1][0] == mapa["abre"][pc]:
+                pila_try.pop()
+            return pc + 1
+
+        if clave == "clrerr":
+            ambito.globales["errcode"] = 0
+            self._ultimo_error = ""
+            return pc + 1
+
+        if clave == "passerr":
+            raise TIBasicError(self._ultimo_error or "error propagado con PassErr")
+
+        # ── Saltos y fin ──────────────────────────────────────────────────────
+        if clave == "lbl":
+            return pc + 1
+
+        if clave == "goto":
+            raise _Saltar(resto.strip().lower())
+
+        if clave == "return":
+            raise _Retornar(self._evaluar(resto, ambito) if resto else None)
+
+        if clave == "stop":
+            raise _Detener()
+
+        if clave in ("endfunc", "endprgm"):
+            raise _Retornar(None)
+
+        # ── Guardar y expresiones sueltas ─────────────────────────────────────
+        partes = _partir_fuera_de_cadenas(st, "→")
+        if len(partes) > 1:
+            valor = self._evaluar(partes[0], ambito)
+            for destino in partes[1:]:
+                self._guardar(destino, valor, ambito)
+                valor = self._evaluar(destino, ambito)
+            return pc + 1
+
+        partes = _partir_fuera_de_cadenas(st, ":=")
+        if len(partes) == 2:
+            self._guardar(partes[0], self._evaluar(partes[1], ambito), ambito)
+            return pc + 1
+
+        # llamada a un programa o expresión cuyo valor se descarta
+        self._evaluar(st, ambito)
+        return pc + 1
+
+    def _resolver_if(self, sentencias, pc, mapa, ambito) -> int:
+        """Recorre la cadena If/ElseIf/Else y devuelve dónde seguir."""
+        idx = pc
+        while True:
+            st = sentencias[idx]
+            clave = _clave(st)
+            if clave in ("if", "elseif"):
+                cond_txt = re.sub(r'\bthen\s*$', '', st[len(clave):].strip(),
+                                  flags=re.IGNORECASE).strip()
+                if self._evaluar(cond_txt, ambito):
+                    return idx + 1
+                siguiente = mapa["alt"].get(idx)
+                if siguiente is None:
+                    raise TIBasicError("Bloque If mal formado")
+                idx = siguiente
+            elif clave == "else":
+                return idx + 1
+            else:                       # endif
+                return idx + 1
+
+    # ── Funciones y programas del usuario ─────────────────────────────────────
+
+    def _crear_invocable(self, nombre, params, cuerpo, es_func):
+        def _llamar(*args):
+            return self._invocar(nombre, params, cuerpo, args, es_func)
+        _llamar.__name__ = nombre
+        return _llamar
+
+    def _invocar(self, nombre, params, cuerpo, args, es_func):
+        if len(args) != len(params):
+            raise TIBasicError(
+                f"{nombre}() espera {len(params)} argumento(s) y recibió {len(args)}")
+        if self._profundidad >= self.PROFUNDIDAD_MAX:
+            raise TIBasicError(f"Demasiada recursión en {nombre}()")
+
+        ambito = _Ambito(self._globales)
+        for p, v in zip(params, args):
+            ambito.declarar(p)
+            ambito.locales[p] = v
+
+        self._profundidad += 1
+        try:
+            self._correr(cuerpo, self._mapear(cuerpo), ambito)
+            return None
+        except _Retornar as r:
+            return r.valor
+        finally:
+            self._profundidad -= 1
+
+    # ── Punto de entrada ──────────────────────────────────────────────────────
 
     def ejecutar(self, codigo: str):
-        self._stop_flag.clear()
-        self._vars.clear()
-        self._strs.clear()
-        self._lists.clear()
-        self._arrays.clear()
-        self._defs.clear()
-        self._gosub_stack.clear()
-
-        stmts = self._parsear(codigo)
-        end_map, else_map, else_end_map, loop_map, block_end_set = \
-            self._construir_mapa(stmts)
-
-        lbl_map: dict[str, int] = {}
-        for i, s in enumerate(stmts):
-            kw = self._kw(s)
-            if kw == 'LBL':
-                lbl_map[s[3:].strip().upper()] = i
-
-        ip = 0
+        self._parar.clear()
+        self._globales = {}
+        self._funcs = {}
+        self._profundidad = 0
+        self._ultimo_error = ""
         try:
-            while ip < len(stmts):
-                if self._stop_flag.is_set():
-                    raise _Stop(silent=False)
-                ip = self._stmt(stmts[ip], ip, stmts,
-                                end_map, else_map, else_end_map,
-                                loop_map, lbl_map, block_end_set)
-        except _Stop as e:
-            if not e.silent:
-                self._emit("■ Programa detenido")
-        except _Return:
-            pass
-        except TIBasicError as e:
-            self._emit(f"  ERR: {e}")
-        except Exception as e:
-            self._emit(f"  ERR inesperado: {type(e).__name__}: {e}")
-        self._emit("")
+            sentencias = self._partir(codigo)
+            sueltas = self._extraer_definiciones(sentencias)
 
-    # ── Ejecución de un statement ──────────────────────────────────────────
-
-    def _stmt(self, s: str, ip: int, stmts: list[str],
-              end_map, else_map, else_end_map,
-              loop_map, lbl_map, block_end_set) -> int:
-        s = s.strip()
-        if not s:
-            return ip + 1
-
-        upper = s.upper().strip()
-        kw    = self._kw(s)
-
-        # ── Comentarios ──────────────────────────────────────────────────────
-        if kw in ('REM', 'COMMENT') or s.startswith('//') or s.startswith("'"):
-            return ip + 1
-
-        # ── Asignación := (TI-Nspire) ─────────────────────────────────────────
-        if ':=' in s:
-            idx = s.index(':=')
-            var  = s[:idx].strip().upper()
-            expr = s[idx + 2:].strip()
-            self._asignar(var, self._eval(expr))
-            return ip + 1
-
-        # ── Marcadores de bloque ─────────────────────────────────────────────
-        if upper == 'THEN':
-            return ip + 1
-
-        if upper == 'ELSE':
-            return else_end_map.get(ip, ip) + 1
-
-        if kw in ('END', 'SUBEND'):
-            if ip in loop_map:
-                start = loop_map[ip]
-                sk = self._kw(stmts[start])
-                if sk == 'FOR':
-                    return self._for_end(stmts[start], start, ip)
-                elif sk == 'WHILE':
-                    return start
-                elif sk == 'REPEAT':
-                    return self._repeat_end(stmts[start], start, ip)
-            if ip in block_end_set:
-                return ip + 1          # cierra bloque IF
-            raise _Stop(silent=True)   # END standalone = fin normal del programa
-
-        # WEND / ENDWHILE / ENDFOR / ENDLOOP
-        if kw in ('WEND', 'ENDWHILE', 'ENDFOR', 'ENDLOOP'):
-            if ip in loop_map:
-                start = loop_map[ip]
-                sk = self._kw(stmts[start])
-                if sk == 'FOR':
-                    return self._for_end(stmts[start], start, ip)
-                elif sk in ('WHILE',):
-                    return start       # re-evalúa condición del WHILE
-                elif sk == 'REPEAT':
-                    return self._repeat_end(stmts[start], start, ip)
-            return ip + 1
-
-        # ENDIF
-        if kw == 'ENDIF':
-            return ip + 1
-
-        if kw == 'NEXT':
-            if ip in loop_map:
-                return self._for_end(stmts[loop_map[ip]], loop_map[ip], ip)
-            return ip + 1
-
-        if upper in ('LBL', 'DATA', 'SUB'):
-            return ip + 1
-
-        # ── Terminación ──────────────────────────────────────────────────────
-        if upper in ('STOP', 'BYE'):
-            raise _Stop(silent=False)
-
-        if upper in ('RETURN', 'SUBEXIT'):
-            if self._gosub_stack:
-                return self._gosub_stack.pop()
-            raise _Return()
-
-        # ── Asignación TI-Nspire: expr→Var ───────────────────────────────────
-        if '→' in s:
-            arrow = s.rfind('→')
-            expr_part = s[:arrow].strip()
-            var_part  = s[arrow + 1:].strip().upper()
-            self._asignar(var_part, self._eval(expr_part))
-            return ip + 1
-
-        # ── Asignación TI-99/4A: LET var = expr ──────────────────────────────
-        if kw == 'LET':
-            rest = s[3:].strip()
-            return self._asignar_let(rest, ip)
-
-        # ── Asignación a elemento de array: A(I) = expr ───────────────────────
-        m_arr = re.match(r'^([A-Za-z_][A-Za-z0-9_$]*)\s*\((.+)\)\s*=\s*(.*)', s)
-        if m_arr and m_arr.group(1).upper() in self._arrays:
-            name = m_arr.group(1).upper()
-            idx_list = [int(self._eval(x)) for x in self._split_args(m_arr.group(2))]
-            val = self._eval(m_arr.group(3))
-            arr = self._arrays[name]
-            if len(idx_list) == 1:
-                arr[idx_list[0]] = float(val)
-            elif len(idx_list) == 2:
-                arr[idx_list[0]][idx_list[1]] = float(val)
-            return ip + 1
-
-        # ── Asignación implícita: VAR = expr (sin LET) ───────────────────────
-        if re.match(r'^[A-Za-z_][A-Za-z0-9_$]*\s*=\s*', s) and kw not in (
-                'IF','FOR','WHILE','REPEAT','PRINT','DISPLAY','ACCEPT',
-                'INPUT','PROMPT','DISP','OUTPUT','GOSUB','GOTO','ON','DEF',
-                'DIM','CALL','READ','RESTORE','RANDOMIZE','OPEN','CLOSE'):
-            eq = s.index('=')
-            var = s[:eq].strip().upper()
-            expr = s[eq+1:].strip()
-            if not expr.startswith('=') and '(' not in var:
-                self._asignar(var, self._eval(expr))
-                return ip + 1
-
-        # ── DEF fn(x) = expr ─────────────────────────────────────────────────
-        if kw == 'DEF':
-            m = re.match(r'DEF\s+(\w+)\s*\((\w+)\)\s*=\s*(.+)', s, re.IGNORECASE)
-            if m:
-                fname  = m.group(1).upper()
-                param  = m.group(2).upper()
-                expr   = _normalizar(m.group(3))
-                self._defs[fname] = (param, expr)
-            return ip + 1
-
-        # ── DIM var(n[,m]) ────────────────────────────────────────────────────
-        if kw == 'DIM':
-            for decl in self._split_args(s[3:].strip()):
-                decl = decl.strip()
-                m = re.match(r'(\w+)\s*\((.+)\)', decl, re.IGNORECASE)
-                if m:
-                    name = m.group(1).upper()
-                    dims = [int(self._eval(d)) for d in self._split_args(m.group(2))]
-                    if len(dims) == 1:
-                        self._arrays[name] = [0.0] * (dims[0] + 1)
-                    else:
-                        self._arrays[name] = [[0.0] * (dims[1]+1)
-                                               for _ in range(dims[0]+1)]
-            return ip + 1
-
-        # ── RANDOMIZE ─────────────────────────────────────────────────────────
-        if kw == 'RANDOMIZE':
-            rest = s[9:].strip()
-            seed = int(self._eval(rest)) if rest else None
-            random.seed(seed)
-            return ip + 1
-
-        # ── CLRHOME / CALL CLEAR ──────────────────────────────────────────────
-        if upper == 'CLRHOME':
-            if self._clrhome_cb: self._clrhome_cb()
-            return ip + 1
-
-        if upper in ('CALL CLEAR', 'NEW'):
-            if self._clrhome_cb: self._clrhome_cb()
-            return ip + 1
-
-        # ── CALL (subprogramas TI-99/4A) ─────────────────────────────────────
-        if kw == 'CALL':
-            return self._call(s[4:].strip(), ip)
-
-        # ── PRINT / DISP ─────────────────────────────────────────────────────
-        if kw in ('PRINT', 'DISP'):
-            rest = s[len(kw):].strip()
-            if rest.upper().startswith('USING'):
-                rest = rest[5:].strip().lstrip('"').strip()
-            linea = ''
-            for arg in self._split_args_print(rest):
-                arg = arg.strip()
-                if arg == ';':
-                    continue
-                if arg == ',':
-                    linea += '\t'
-                    continue
-                if arg.startswith('"') and arg.endswith('"'):
-                    linea += arg[1:-1]
-                else:
-                    linea += self._fmt(self._eval(arg))
-            self._emit(linea)
-            return ip + 1
-
-        # ── PAUSE ─────────────────────────────────────────────────────────────
-        if kw == 'PAUSE':
-            rest = s[5:].strip()
-            if rest:
-                self._emit(self._fmt(self._eval(rest)))
-            self._pedir("[PAUSA — Enter para continuar]")
-            return ip + 1
-
-        # ── INPUT / LINPUT ────────────────────────────────────────────────────
-        if kw in ('INPUT', 'LINPUT'):
-            parts = self._split_args(s[len(kw):].strip())
-            if len(parts) >= 2:
-                prompt = parts[0].strip().strip('"')
-                var = parts[1].strip().upper()
-            elif parts:
-                var = parts[0].strip().upper()
-                prompt = f"{var}? "
+            if sueltas:
+                ambito = _Ambito(self._globales)
+                self._correr(sueltas, self._mapear(sueltas), ambito)
             else:
-                return ip + 1
-            raw = self._pedir(prompt)
-            try:
-                self._asignar(var, float(self._eval(raw)))
-            except Exception:
-                self._asignar(var, raw)
-            return ip + 1
+                # Solo hay definiciones: se ejecuta el programa principal, igual
+                # que si lo llamaras por su nombre desde la calculadora.
+                programas = [n for n, (_p, _c, f) in self._funcs.items() if not f]
+                if not programas:
+                    self._mostrar("(solo hay definiciones; nada que ejecutar)")
+                    return
+                principal = "main" if "main" in programas else programas[-1]
+                params = self._funcs[principal][0]
+                if params:
+                    self._mostrar(
+                        f"«{principal}()» necesita {len(params)} argumento(s); "
+                        f"llámalo tú desde el programa.")
+                    return
+                self._mostrar(f"— ejecutando {principal}() —")
+                self._invocar(principal, [], self._funcs[principal][1], (), False)
 
-        # ── PROMPT ────────────────────────────────────────────────────────────
-        if kw == 'PROMPT':
-            for var in self._split_args(s[6:].strip()):
-                var = var.strip().upper()
-                raw = self._pedir(f"{var}=? ")
-                try:
-                    self._asignar(var, float(self._eval(raw)))
-                except Exception:
-                    self._asignar(var, raw)
-            return ip + 1
-
-        # ── OUTPUT / DISPLAY AT ───────────────────────────────────────────────
-        if kw in ('OUTPUT', 'DISPLAY'):
-            m = re.match(r'(?:Output|Display)\s*AT\s*\(([^)]+)\)\s*.*?:\s*(.*)',
-                         s, re.IGNORECASE)
-            if m:
-                val = self._eval(m.group(2).strip()) if m.group(2).strip() else ''
-                self._emit(self._fmt(val))
-            else:
-                m2 = re.match(r'Output\s*\((.+)\)', s, re.IGNORECASE)
-                if m2:
-                    parts = self._split_args(m2.group(1))
-                    if len(parts) >= 3:
-                        self._emit(self._fmt(self._eval(parts[2].strip())))
-            return ip + 1
-
-        # ── READ ──────────────────────────────────────────────────────────────
-        if kw == 'READ':
-            for var in self._split_args(s[4:].strip()):
-                var = var.strip().upper()
-                if self._data_ptr < len(self._data):
-                    val = self._data[self._data_ptr]
-                    self._data_ptr += 1
-                    self._asignar(var, val)
-                else:
-                    raise TIBasicError("READ: sin más datos")
-            return ip + 1
-
-        if upper == 'RESTORE':
-            self._data_ptr = 0
-            return ip + 1
-
-        # ── IF ────────────────────────────────────────────────────────────────
-        if kw == 'IF':
-            return self._if_stmt(s, ip, stmts,
-                                 end_map, else_map, else_end_map,
-                                 loop_map, lbl_map, block_end_set)
-
-        # ── FOR ───────────────────────────────────────────────────────────────
-        if kw == 'FOR':
-            if re.match(r'For\s*\(', s, re.IGNORECASE):
-                return self._for_nspire(s, ip, end_map)
-            else:
-                return self._for_tibasic(s, ip, end_map)
-
-        # ── WHILE ─────────────────────────────────────────────────────────────
-        if kw == 'WHILE':
-            cond = bool(self._eval(s[5:].strip()))
-            return (ip + 1) if cond else (end_map.get(ip, ip) + 1)
-
-        # ── REPEAT ────────────────────────────────────────────────────────────
-        if kw == 'REPEAT':
-            return ip + 1
-
-        # ── GOTO ──────────────────────────────────────────────────────────────
-        if kw == 'GOTO':
-            return self._saltar(s[4:].strip(), lbl_map)
-
-        if kw == 'LBL':
-            return ip + 1
-
-        # ── GOSUB ─────────────────────────────────────────────────────────────
-        if kw == 'GOSUB':
-            self._gosub_stack.append(ip + 1)
-            return self._saltar(s[5:].strip(), lbl_map)
-
-        # ── ON...GOTO / ON...GOSUB ────────────────────────────────────────────
-        if kw == 'ON':
-            return self._on_stmt(s, ip, lbl_map)
-
-        # ── Expresión numérica sola ───────────────────────────────────────────
-        try:
-            val = self._eval(s)
-            self._emit(f"  {self._fmt(val)}")
-        except TIBasicError:
+        except _Detener:
+            self._mostrar("— detenido —")
+        except _Retornar:
             pass
-
-        return ip + 1
-
-    # ── Helpers de asignación ─────────────────────────────────────────────────
-
-    def _asignar(self, var: str, val):
-        if re.match(r'^STR[1-9]$', var):
-            self._strs[var] = self._fmt(val)
-        elif re.match(r'^L[1-6]$', var):
-            self._lists[var] = val if isinstance(val, list) else [val]
-        elif var.endswith('$'):
-            self._strs[var] = str(val)
-        elif var in self._arrays:
-            pass
-        else:
-            try:
-                self._vars[var] = float(val)
-            except (TypeError, ValueError):
-                self._strs[var] = str(val)
-
-    def _asignar_let(self, rest: str, ip: int) -> int:
-        m = re.match(r'(\w+)\s*\((.+)\)\s*=\s*(.+)', rest)
-        if m:
-            name = m.group(1).upper()
-            idx  = [int(self._eval(x)) for x in self._split_args(m.group(2))]
-            val  = self._eval(m.group(3))
-            if name in self._arrays:
-                arr = self._arrays[name]
-                if len(idx) == 1:
-                    arr[idx[0]] = float(val)
-                elif len(idx) == 2:
-                    arr[idx[0]][idx[1]] = float(val)
-        else:
-            eq = rest.index('=')
-            var = rest[:eq].strip().upper()
-            expr = rest[eq+1:].strip()
-            self._asignar(var, self._eval(expr))
-        return ip + 1
-
-    # ── Helpers de control de flujo ───────────────────────────────────────────
-
-    def _saltar(self, destino: str, lbl_map: dict) -> int:
-        destino = destino.strip()
-        if destino.isdigit():
-            n = int(destino)
-            if n in self._line_num_map:
-                return self._line_num_map[n]
-            raise TIBasicError(f"Línea {n} no encontrada")
-        lbl = destino.upper()
-        if lbl in lbl_map:
-            return lbl_map[lbl]
-        raise TIBasicError(f"Etiqueta '{destino}' no encontrada")
-
-    def _if_stmt(self, s: str, ip: int, stmts,
-                 end_map, else_map, else_end_map,
-                 loop_map, lbl_map, block_end_set) -> int:
-        cond_str = s[2:].strip()
-
-        # Detectar IF inline: IF cond THEN stmt [ELSE stmt]
-        m_inline = re.match(r'(.+?)\s+THEN\s+(.*)', cond_str, re.IGNORECASE)
-        if m_inline:
-            cond = bool(self._eval(m_inline.group(1).strip()))
-            then_part = m_inline.group(2).strip()
-            m_else = re.split(r'\s+ELSE\s+', then_part, maxsplit=1, flags=re.IGNORECASE)
-            try:
-                if cond:
-                    self._ejecutar_inline(m_else[0].strip(), ip, stmts,
-                                          end_map, else_map, else_end_map,
-                                          loop_map, lbl_map, block_end_set)
-                elif len(m_else) > 1:
-                    self._ejecutar_inline(m_else[1].strip(), ip, stmts,
-                                          end_map, else_map, else_end_map,
-                                          loop_map, lbl_map, block_end_set)
-            except _GotoInline as e:
-                return e.target
-            return ip + 1
-
-        # Bloque IF con THEN en línea siguiente (TI-Nspire / TI-99/4A estilo bloque)
-        j = ip + 1
-        while j < len(stmts) and not stmts[j].strip():
-            j += 1
-        is_block = j < len(stmts) and self._kw(stmts[j]) == 'THEN'
-        cond = bool(self._eval(cond_str))
-        if is_block:
-            if cond:
-                return ip + 1
-            if ip in else_map:
-                return else_map[ip] + 1
-            return end_map.get(ip, ip) + 1
-        else:
-            return (ip + 1) if cond else (ip + 2)
-
-    def _ejecutar_inline(self, stmt: str, ip: int, stmts,
-                         end_map, else_map, else_end_map,
-                         loop_map, lbl_map, block_end_set):
-        """Ejecuta un statement inline (consecuencia de IF de una línea)."""
-        if not stmt:
-            return
-        kw = self._kw(stmt)
-        if kw == 'GOTO':
-            raise _GotoInline(self._saltar(stmt[4:].strip(), lbl_map))
-        if kw == 'GOSUB':
-            self._gosub_stack.append(ip + 1)
-            raise _GotoInline(self._saltar(stmt[5:].strip(), lbl_map))
-        # Cualquier otro statement se ejecuta normalmente
-        self._stmt(stmt, ip, stmts,
-                   end_map, else_map, else_end_map,
-                   loop_map, lbl_map, block_end_set)
-
-    def _on_stmt(self, s: str, ip: int, lbl_map: dict) -> int:
-        """ON expr GOTO/GOSUB dest1, dest2, ..."""
-        m = re.match(r'ON\s+(.+?)\s+(GOTO|GOSUB)\s+(.+)', s, re.IGNORECASE)
-        if not m:
-            return ip + 1
-        idx  = int(self._eval(m.group(1))) - 1
-        mode = m.group(2).upper()
-        dests = [d.strip() for d in m.group(3).split(',')]
-        if 0 <= idx < len(dests):
-            if mode == 'GOSUB':
-                self._gosub_stack.append(ip + 1)
-            return self._saltar(dests[idx], lbl_map)
-        return ip + 1
-
-    # ── Helpers de FOR ────────────────────────────────────────────────────────
-
-    def _for_nspire(self, s: str, ip: int, end_map: dict) -> int:
-        m = re.match(r'For\s*\((.+)\)', s, re.IGNORECASE)
-        if not m:
-            raise TIBasicError(f"Sintaxis For: {s}")
-        parts = self._split_args(m.group(1))
-        var   = parts[0].strip().upper()
-        start = float(self._eval(parts[1]))
-        stop  = float(self._eval(parts[2]))
-        step  = float(self._eval(parts[3])) if len(parts) > 3 else 1.0
-        self._vars[var] = start
-        in_range = (step > 0 and start <= stop) or (step < 0 and start >= stop)
-        return (ip + 1) if in_range else (end_map.get(ip, ip) + 1)
-
-    def _for_tibasic(self, s: str, ip: int, end_map: dict) -> int:
-        m = re.match(r'FOR\s+(\w+)\s*=\s*(.+?)\s+TO\s+(.+?)(?:\s+STEP\s+(.+))?$',
-                     s, re.IGNORECASE)
-        if not m:
-            raise TIBasicError(f"Sintaxis FOR: {s}")
-        var   = m.group(1).upper()
-        start = float(self._eval(m.group(2)))
-        stop  = float(self._eval(m.group(3)))
-        step  = float(self._eval(m.group(4))) if m.group(4) else 1.0
-        self._vars[var] = start
-        in_range = (step > 0 and start <= stop) or (step < 0 and start >= stop)
-        return (ip + 1) if in_range else (end_map.get(ip, ip) + 1)
-
-    def _for_end(self, for_stmt: str, start: int, end: int) -> int:
-        if re.match(r'For\s*\(', for_stmt, re.IGNORECASE):
-            m = re.match(r'For\s*\((.+)\)', for_stmt, re.IGNORECASE)
-            parts = self._split_args(m.group(1))
-            var  = parts[0].strip().upper()
-            stop = float(self._eval(parts[2]))
-            step = float(self._eval(parts[3])) if len(parts) > 3 else 1.0
-        else:
-            m = re.match(r'FOR\s+(\w+)\s*=\s*.+?\s+TO\s+(.+?)(?:\s+STEP\s+(.+))?$',
-                         for_stmt, re.IGNORECASE)
-            if not m:
-                return end + 1
-            var  = m.group(1).upper()
-            stop = float(self._eval(m.group(2)))
-            step = float(self._eval(m.group(3))) if m.group(3) else 1.0
-
-        self._vars[var] = self._vars.get(var, 0) + step
-        cur = self._vars[var]
-        in_range = (step > 0 and cur <= stop) or (step < 0 and cur >= stop)
-        return (start + 1) if in_range else (end + 1)
-
-    def _repeat_end(self, repeat_stmt: str, start: int, end: int) -> int:
-        cond_str = repeat_stmt[6:].strip()
-        return (end + 1) if bool(self._eval(cond_str)) else (start + 1)
-
-    # ── CALL subprogramas ─────────────────────────────────────────────────────
-
-    def _call(self, rest: str, ip: int) -> int:
-        kw = self._kw(rest).upper()
-        if kw == 'CLEAR':
-            if self._clrhome_cb: self._clrhome_cb()
-        elif kw == 'KEY':
-            m = re.match(r'KEY\s*\((.+)\)', rest, re.IGNORECASE)
-            if m:
-                parts = self._split_args(m.group(1))
-                if len(parts) >= 2:
-                    self._asignar(parts[1].strip().upper(), 0.0)
-                if len(parts) >= 3:
-                    self._asignar(parts[2].strip().upper(), 0.0)
-        elif kw == 'SOUND':
-            pass
-        elif kw == 'SAY':
-            pass
-        elif kw in ('CHAR','CHARSET','COLOR','SCREEN','HCHAR','VCHAR',
-                    'SPRITE','DELSPRITE','MOTION','PATTERN','LOCATE',
-                    'MAGNIFY','COINC','DISTANCE','POSITION'):
-            pass
-        elif kw == 'ERR':
-            pass
-        elif kw == 'VERSION':
-            m = re.match(r'VERSION\s*\((.+)\)', rest, re.IGNORECASE)
-            if m:
-                self._asignar(m.group(1).strip().upper(), 200.0)
-        return ip + 1
-
-    # ── Split de print (respeta ; y ,) ────────────────────────────────────────
-
-    def _split_args_print(self, s: str) -> list[str]:
-        tokens, depth, in_q, cur = [], 0, False, []
-        for c in s:
-            if c == '"':
-                in_q = not in_q; cur.append(c)
-            elif not in_q and c == '(':
-                depth += 1; cur.append(c)
-            elif not in_q and c == ')':
-                depth -= 1; cur.append(c)
-            elif not in_q and c in (',', ';') and depth == 0:
-                tokens.append(''.join(cur).strip())
-                tokens.append(c)
-                cur = []
-            else:
-                cur.append(c)
-        if cur:
-            tokens.append(''.join(cur).strip())
-        return [t for t in tokens if t]
-
-    # ── Split genérico ────────────────────────────────────────────────────────
-
-    def _split_args(self, s: str) -> list[str]:
-        args, depth, in_q, cur = [], 0, False, []
-        for c in s:
-            if c == '"':
-                in_q = not in_q; cur.append(c)
-            elif not in_q and c == '(':
-                depth += 1; cur.append(c)
-            elif not in_q and c == ')':
-                depth -= 1; cur.append(c)
-            elif not in_q and c == ',' and depth == 0:
-                args.append(''.join(cur)); cur = []
-            else:
-                cur.append(c)
-        if cur:
-            args.append(''.join(cur))
-        return args
+        except TIBasicError as err:
+            self._mostrar(f"⚠ {err}")
+        except RecursionError:
+            self._mostrar("⚠ Demasiada recursión")
+        except Exception as err:                       # red de seguridad
+            self._mostrar(f"⚠ Error interno: {type(err).__name__}: {err}")
