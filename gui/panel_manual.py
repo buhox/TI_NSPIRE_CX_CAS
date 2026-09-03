@@ -13,6 +13,7 @@ _SECCIONES = [
     ("cas",       "🧮  CAS / Álgebra"),
     ("matrices",  "⬛  Matrices"),
     ("circuitos", "⚡  Circuitos AC/DC"),
+    ("campos",    "🧲  Campos eléc./magn."),
     ("graficas",  "📈  Gráficas"),
     ("tibasic",   "💾  TI-Basic"),
     ("archivos",  "📁  Archivos"),
@@ -155,6 +156,42 @@ circuito_rlc_segundo_orden(r=20, l=0.1, c=100e-6, v_fuente=10, salida=R, f=50.33
   → en f0 la salida en R tiene ganancia 1 (pasa todo); en C o en L, ganancia = Q</pre>
 <p class="nota">Verificado integrando numéricamente la ecuación diferencial del
 circuito (SciPy) en los tres regímenes de amortiguamiento — coincide hasta 10⁻¹⁰.</p>
+
+<h2 id="campos">🧲 Campos eléctricos y magnéticos</h2>
+<p>Las 17 fórmulas de la sección 5 de la librería FX-880P (pág. 274). Se invocan
+igual, desde la consola CAS. Las constantes (ε₀, μ₀, k₀, carga y masa del
+electrón) salen de <code>scipy.constants</code>, con los valores CODATA
+actuales en vez de los redondeos del manual de 1990.</p>
+<pre>ley_coulomb_electrica(q1=1e-6, q2=2e-6, r=0.05)   → F = 7.19 N
+electron_campo_electrico(v_aceleracion=1)          → v = 593097 m/s
+capacidad_serie(10e-6, 20e-6)                      → C = 6.67 µF
+autoinduccion(l=0.1, delta_i=2, delta_t=0.01)      → V = -20 V</pre>
+<table>
+<tr><th>Función</th><th>Fórmula</th><th>Parámetros (deja en blanco la incógnita)</th></tr>
+<tr><td><code>ley_coulomb_electrica</code></td><td>F = k₀·Q₁Q₂/r²</td><td><code>f, q1, q2, r</code></td></tr>
+<tr><td><code>campo_electrico</code></td><td>E = V/d; F = QE; W = QV</td><td><code>e, v, d</code> + opcional <code>q</code></td></tr>
+<tr><td><code>capacidad_electrica</code></td><td>Q = C·V</td><td><code>c, q, v</code></td></tr>
+<tr><td><code>capacidad_placas</code></td><td>C = ε_r·ε₀·A/d</td><td><code>area, d, epsilon_r</code></td></tr>
+<tr><td><code>capacidad_paralelo</code></td><td>C = C1+C2+…</td><td>valores por posición</td></tr>
+<tr><td><code>capacidad_serie</code></td><td>1/C = 1/C1+1/C2+…</td><td>valores por posición</td></tr>
+<tr><td><code>constante_dielectrica</code></td><td>D = ε·E; C = ε_r·C₀</td><td><code>epsilon_r</code> + opcional <code>e, c0</code></td></tr>
+<tr><td><code>energia_electrostatica</code></td><td>W = ½CV² = ½QV = Q²/2C</td><td><code>c, v, q</code> (dos cualesquiera)</td></tr>
+<tr><td><code>electron_campo_electrico</code></td><td>½mv² = qV</td><td><code>v_aceleracion</code> + opcional <code>carga, masa</code></td></tr>
+<tr><td><code>ley_coulomb_magnetica</code></td><td>F = k_m·m₁m₂/r²</td><td><code>f, m1, m2, r</code></td></tr>
+<tr><td><code>campo_magnetico_hilo</code></td><td>H = I/(2πr); B = μ₀H</td><td><code>i, r, h</code></td></tr>
+<tr><td><code>campo_magnetico_solenoide</code></td><td>H = N·I/L; B = μ_r·μ₀·H</td><td><code>i, vueltas, longitud, mu_r</code></td></tr>
+<tr><td><code>flujo_magnetico</code></td><td>Φ = B·A·cos(θ)</td><td><code>flujo, b, area, angulo</code></td></tr>
+<tr><td><code>fuerza_lorentz</code></td><td>F = QvB·sen(θ); r = mv/QB</td><td><code>q, v, b, angulo</code> + opcional <code>masa</code></td></tr>
+<tr><td><code>electron_campo_magnetico</code></td><td>ω = QB/m; r = mv/QB</td><td><code>b</code> + opcional <code>v, carga, masa</code></td></tr>
+<tr><td><code>ley_faraday</code></td><td>V = −N·ΔΦ/Δt</td><td><code>delta_flujo, delta_t, vueltas</code></td></tr>
+<tr><td><code>induccion_electromagnetica</code></td><td>V = B·L·v</td><td><code>b, longitud, v, fem</code></td></tr>
+<tr><td><code>induccion_mutua</code></td><td>V = −M·ΔI/Δt</td><td><code>m, delta_i, delta_t, v</code></td></tr>
+<tr><td><code>autoinduccion</code></td><td>V = −L·ΔI/Δt</td><td><code>l, delta_i, delta_t, v</code></td></tr>
+</table>
+<p class="nota">El OCR del manual llegó ilegible en varias de estas fórmulas, así
+que están escritas en su forma estándar SI y verificadas contra valores de
+referencia conocidos (k₀, ε₀, el electrón a 1 V = 5.93×10⁵ m/s, el ciclotrón
+del electrón en 1 T = 27.99 GHz).</p>
 
 <h2 id="graficas">📈 Gráficas</h2>
 <p>Pestaña <b>Gráficas</b>: elige el modo con los botones superiores.</p>

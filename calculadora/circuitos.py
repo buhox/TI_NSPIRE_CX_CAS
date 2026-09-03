@@ -13,7 +13,7 @@ import logging
 import math
 from typing import Optional, Sequence
 
-from .formulas import ResultadoFormula
+from .formulas import REGISTRO, ResultadoFormula
 
 logger = logging.getLogger("ti_nspire.circuitos")
 
@@ -568,97 +568,37 @@ def circuito_rlc_segundo_orden(r: float, l: float, c: float, v_fuente: float,
     return ResultadoFormula(valores, texto="\n".join(lineas))
 
 
-# ── Invocación por nombre desde la consola CAS ───────────────────────────────
+# ── Registro para invocar estas fórmulas por nombre desde la consola CAS ────
 # Permite escribir, por ejemplo, "ley_ohm(v=12, i=2)" directamente en la
 # consola de la pestaña CAS (con "Evaluar / Simplificar" seleccionado).
 
-_FUNCIONES_KWARGS = {
-    "ley_ohm": ley_ohm,
-    "circuito_dc": circuito_dc,
-    "potencia_dc": potencia_dc,
-    "calor_joule": calor_joule,
-    "conductancia": conductancia,
-    "puente_wheatstone": puente_wheatstone,
-    "valor_instantaneo": valor_instantaneo,
-    "valor_efectivo": valor_efectivo,
-    "potencia_ac": potencia_ac,
-    "factor_potencia": factor_potencia,
-    "transformador": transformador,
-    "reactancia_inductiva": reactancia_inductiva,
-    "reactancia_capacitiva": reactancia_capacitiva,
-    "impedancia": impedancia,
-    "frecuencia_natural": frecuencia_natural,
-    "oscilacion_electrica": oscilacion_electrica,
-    "circuito_rc_primer_orden": circuito_rc_primer_orden,
-    "circuito_rlc_segundo_orden": circuito_rlc_segundo_orden,
-}
-_FUNCIONES_POSICIONALES = {
-    "resistencia_serie": resistencia_serie,
-    "resistencia_paralelo": resistencia_paralelo,
-}
-_FUNCIONES_LISTA = {
-    "kirchhoff_corrientes": kirchhoff_corrientes,
-    "kirchhoff_voltajes": kirchhoff_voltajes,
-}
-
-NOMBRES_DISPONIBLES = sorted(
-    set(_FUNCIONES_KWARGS) | set(_FUNCIONES_POSICIONALES) | set(_FUNCIONES_LISTA))
-
-
-def _parsear_valor(token: str):
-    """Convierte un token de la consola a float, o lo deja como texto (para
-    parámetros no numéricos como orden="RC")."""
-    token = token.strip()
-    if token in ("", "?", "none", "None"):
-        return None
-    try:
-        return float(token)
-    except ValueError:
-        return token.strip("\"'")
-
-
-def _parsear_argumentos(texto: str) -> tuple[list, dict]:
-    texto = texto.strip()
-    if not texto:
-        return [], {}
-    posicionales, nombrados = [], {}
-    for parte in texto.split(","):
-        if "=" in parte:
-            clave, _, val = parte.partition("=")
-            nombrados[clave.strip()] = _parsear_valor(val)
-        else:
-            posicionales.append(_parsear_valor(parte))
-    return posicionales, nombrados
-
-
-def invocar(nombre: str, texto_argumentos: str) -> Optional[ResultadoFormula]:
-    """
-    Busca `nombre` entre las fórmulas de circuitos e invoca la función con los
-    argumentos dados en texto. Sintaxis: "clave=valor" separados por comas
-    para la mayoría ("ley_ohm(v=12, i=2)"); valores por posición para
-    resistencia_serie/paralelo ("resistencia_serie(10,20,30)"); valores por
-    posición con "?" para la incógnita en Kirchhoff ("kirchhoff_corrientes(2,-1,?)").
-    Retorna None si `nombre` no es una fórmula de circuitos conocida, para que
-    el llamador pueda intentar otra ruta de evaluación (p. ej. SymPy).
-    """
-    if nombre not in NOMBRES_DISPONIBLES:
-        return None
-    try:
-        posicionales, nombrados = _parsear_argumentos(texto_argumentos)
-    except ValueError as e:
-        return ResultadoFormula(error=f"Valor numérico inválido: {e}")
-
-    try:
-        if nombre in _FUNCIONES_KWARGS:
-            if posicionales:
-                return ResultadoFormula(error=f"{nombre}(...) usa solo clave=valor, ej: v=12, i=2")
-            return _FUNCIONES_KWARGS[nombre](**nombrados)
-        if nombre in _FUNCIONES_POSICIONALES:
-            if nombrados:
-                return ResultadoFormula(error=f"{nombre}(...) usa solo valores por posición, ej: 10, 20, 30")
-            return _FUNCIONES_POSICIONALES[nombre](*posicionales)
-        if nombrados:
-            return ResultadoFormula(error=f"{nombre}(...) usa solo valores por posición")
-        return _FUNCIONES_LISTA[nombre](posicionales)
-    except TypeError as e:
-        return ResultadoFormula(error=f"Argumentos inválidos para {nombre}: {e}")
+REGISTRO.registrar(
+    kwargs={
+        "ley_ohm": ley_ohm,
+        "circuito_dc": circuito_dc,
+        "potencia_dc": potencia_dc,
+        "calor_joule": calor_joule,
+        "conductancia": conductancia,
+        "puente_wheatstone": puente_wheatstone,
+        "valor_instantaneo": valor_instantaneo,
+        "valor_efectivo": valor_efectivo,
+        "potencia_ac": potencia_ac,
+        "factor_potencia": factor_potencia,
+        "transformador": transformador,
+        "reactancia_inductiva": reactancia_inductiva,
+        "reactancia_capacitiva": reactancia_capacitiva,
+        "impedancia": impedancia,
+        "frecuencia_natural": frecuencia_natural,
+        "oscilacion_electrica": oscilacion_electrica,
+        "circuito_rc_primer_orden": circuito_rc_primer_orden,
+        "circuito_rlc_segundo_orden": circuito_rlc_segundo_orden,
+    },
+    posicionales={
+        "resistencia_serie": resistencia_serie,
+        "resistencia_paralelo": resistencia_paralelo,
+    },
+    lista={
+        "kirchhoff_corrientes": kirchhoff_corrientes,
+        "kirchhoff_voltajes": kirchhoff_voltajes,
+    },
+)

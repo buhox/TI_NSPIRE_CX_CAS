@@ -11,7 +11,8 @@ import logging
 import re
 from typing import Any
 
-from . import circuitos
+from . import campos, circuitos      # se registran en formulas.REGISTRO al importarse
+from .formulas import REGISTRO
 
 logger = logging.getLogger("ti_nspire.cas")
 
@@ -98,10 +99,10 @@ def evaluar(entrada: str) -> ResultadoCAS:
     if not entrada:
         return ResultadoCAS(error="Entrada vacía")
 
-    # Fórmulas de circuitos AC/DC invocadas por nombre, ej: ley_ohm(v=12, i=2)
+    # Fórmulas de física invocadas por nombre, ej: ley_ohm(v=12, i=2)
     m = _RE_LLAMADA.match(entrada)
     if m:
-        r = circuitos.invocar(m.group(1), m.group(2))
+        r = REGISTRO.invocar(m.group(1), m.group(2))
         if r is not None:
             return ResultadoCAS(texto=r.texto) if r.ok else ResultadoCAS(error=r.error)
 

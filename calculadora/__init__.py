@@ -12,3 +12,11 @@ from .circuitos import (
     impedancia, frecuencia_natural, oscilacion_electrica,
     circuito_rc_primer_orden, circuito_rlc_segundo_orden,
 )
+from .campos import (
+    ley_coulomb_electrica, campo_electrico, capacidad_electrica, capacidad_placas,
+    capacidad_paralelo, capacidad_serie, constante_dielectrica,
+    energia_electrostatica, electron_campo_electrico,
+    ley_coulomb_magnetica, campo_magnetico_hilo, campo_magnetico_solenoide,
+    flujo_magnetico, fuerza_lorentz, electron_campo_magnetico,
+    ley_faraday, induccion_electromagnetica, induccion_mutua, autoinduccion,
+)
