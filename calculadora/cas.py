@@ -17,6 +17,9 @@ from .formulas import REGISTRO
 logger = logging.getLogger("ti_nspire.cas")
 
 _RE_LLAMADA = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)$", re.DOTALL)
+# OJO: más abajo `from sympy import ... re ...` sombrea el módulo `re` estándar,
+# así que las expresiones regulares se compilan aquí arriba, no donde se usan.
+_RE_AND = re.compile(r"\band\b", re.IGNORECASE)
 
 try:
     import sympy as sp
@@ -198,6 +201,43 @@ def _dividir_nivel_superior(texto: str, separador: str = ",") -> list[str]:
     return [p.strip() for p in partes if p.strip()]
 
 
+def _dividir_ecuaciones(texto: str) -> list[str]:
+    """
+    Separa las ecuaciones de un sistema aceptando las dos formas de la
+    TI-Nspire: por comas ("x+y=5, x-y=1") o con `and` ("x+y=5 and x-y=1").
+    Los separadores dentro de paréntesis no cuentan.
+    """
+    partes, actual, profundidad = [], [], 0
+    i = 0
+    while i < len(texto):
+        ch = texto[i]
+        if ch in "([{":
+            profundidad += 1
+        elif ch in ")]}":
+            profundidad -= 1
+        if profundidad == 0:
+            if ch == ",":
+                partes.append("".join(actual))
+                actual = []
+                i += 1
+                continue
+            coincide = _RE_AND.match(texto, i)
+            if coincide:
+                partes.append("".join(actual))
+                actual = []
+                i = coincide.end()
+                continue
+        actual.append(ch)
+        i += 1
+    partes.append("".join(actual))
+    return [p.strip() for p in partes if p.strip()]
+
+
+def _dividir_incognitas(texto: str) -> list[str]:
+    """Lee la lista de incógnitas: "x", "x,y" o la forma con llaves "{x,y}"."""
+    return _dividir_nivel_superior((texto or "x").strip().strip("{}"))
+
+
 def _parsear_ecuacion(texto: str):
     """Convierte "lhs = rhs" en Eq(lhs, rhs); sin "=", la expresión se iguala a 0."""
     if "=" in texto and "==" not in texto:
@@ -217,22 +257,23 @@ def resolver(ecuacion_str: str, variable: str = "x") -> ResultadoCAS:
     Formatos aceptados:
         "x^2 - 4"               → se iguala a cero, resuelve respecto a x
         "x^2 - 4 = 0"           → con igualdad explícita
-        "x + y = 5, x - y = 1"  → sistema (ecuaciones separadas por comas)
+        "x + y = 5, x - y = 1"      → sistema (separado por comas)
+        "x + y = 5 and x - y = 1"   → sistema con `and`, como en la calculadora
 
     En un sistema, si `variable` no nombra tantas incógnitas como ecuaciones,
-    se resuelve para todas las que aparezcan. `variable` también acepta varias
-    separadas por comas ("x,y").
+    se resuelve para todas las que aparezcan. `variable` acepta varias
+    incógnitas como en la TI-Nspire: "x,y" o "{x,y}".
     """
     if not _SYMPY_OK:
         return ResultadoCAS(error="SymPy no disponible")
     try:
         ecuacion_str = _normalizar_entrada(ecuacion_str)
         ecuaciones = [_parsear_ecuacion(p)
-                      for p in _dividir_nivel_superior(ecuacion_str)]
+                      for p in _dividir_ecuaciones(ecuacion_str)]
         if not ecuaciones:
             return ResultadoCAS(error="No hay ninguna ecuación que resolver")
 
-        incognitas = [symbols(v) for v in _dividir_nivel_superior(variable or "x")]
+        incognitas = [symbols(v) for v in _dividir_incognitas(variable)]
         if len(ecuaciones) > 1 and len(incognitas) < len(ecuaciones):
             # Sistema sin incógnitas suficientes nombradas: usa las que aparezcan
             libres = set().union(*(ec.free_symbols for ec in ecuaciones))

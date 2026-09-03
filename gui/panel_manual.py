@@ -54,7 +54,7 @@ van en los campos de <b>Parámetros</b>, debajo del menú.</p>
 <tr><td>Evaluar / Simplificar</td><td><code>2+3</code><br><code>sin(pi/2)</code><br><code>sqrt(18)</code></td><td>ninguno</td><td>5 · 1 · 3√2</td></tr>
 <tr><td>Expandir</td><td><code>(x+1)^2</code></td><td>ninguno</td><td>x² + 2x + 1</td></tr>
 <tr><td>Factorizar</td><td><code>x^2-4</code></td><td>ninguno</td><td>(x−2)(x+2)</td></tr>
-<tr><td>Resolver</td><td><code>x^2-4</code><br><code>x^2-4=0</code><br><code>x+y=5, x-y=1</code> (sistema)</td><td><b>Variable</b> = <code>x</code><br>o <code>x,y</code> para un sistema</td><td>[−2, 2]<br>{x: 3, y: 2}</td></tr>
+<tr><td>Resolver</td><td><code>x^2-4</code><br><code>x^2-4=0</code><br><code>x+y=5, x-y=1</code><br><code>x+y=5 and x-y=1</code></td><td><b>Variable</b>: <code>x</code>, <code>x,y</code> o <code>{x,y}</code></td><td>[−2, 2]<br>{x: 3, y: 2}</td></tr>
 <tr><td>Derivar</td><td><code>x^3</code><br><code>sin(x)*x^2</code></td><td><b>Variable</b> = <code>x</code></td><td>3x²</td></tr>
 <tr><td>Integrar (indefinida)</td><td><code>x^2</code></td><td><b>Variable</b> = <code>x</code></td><td>x³/3</td></tr>
 <tr><td>Integrar (definida)</td><td><code>x^2</code></td><td><b>Variable</b>=<code>x</code>, <b>Desde</b>=<code>0</code>, <b>Hasta</b>=<code>1</code></td><td>1/3</td></tr>
@@ -83,8 +83,14 @@ operaciones del menú, la consola reconoce por nombre las <b>77 fórmulas de fí
 de las secciones de Circuitos, Campos, Movimiento y Ondas — esas sí se escriben como
 llamada de función, ej. <code>ley_ohm(v=12, i=2)</code>, y no dependen del menú
 (basta con tener seleccionado "Evaluar / Simplificar").</p>
-<p class="nota">En un sistema de ecuaciones, si el campo Variable nombra menos
-incógnitas que ecuaciones, se resuelve para todas las que aparezcan.</p>
+<p><b>Sistemas de ecuaciones — como en la calculadora:</b> las ecuaciones se
+separan con coma o con <code>and</code>, y las incógnitas se pueden escribir
+entre llaves, igual que en la TI-Nspire real:</p>
+<pre>x+y=5, x-y=1          Variable: x      → {x: 3, y: 2}
+x+y=5 and x-y=1       Variable: {x,y}  → {x: 3, y: 2}
+x+y+z=6 and x-y=0 and z=2              → {x: 2, y: 2, z: 2}</pre>
+<p class="nota">Si el campo Variable nombra menos incógnitas que ecuaciones, se
+resuelve para todas las que aparezcan.</p>
 
 <h2 id="matrices">⬛ Matrices</h2>
 <p>Pestaña <b>Matrices</b>: define el tamaño, llena la tabla y pulsa el botón de
