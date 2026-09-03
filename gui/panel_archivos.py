@@ -11,19 +11,26 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QTreeView, QTreeWidget, QTreeWidgetItem,
     QFileSystemModel, QGroupBox, QLineEdit, QTextEdit,
     QAbstractItemView, QHeaderView, QMessageBox, QFileDialog,
-    QProgressBar, QFrame,
+    QProgressBar, QFrame, QDialog, QInputDialog, QScrollArea,
+    QProgressDialog,
 )
 from PyQt5.QtCore import Qt, QDir, pyqtSignal, QObject
-from PyQt5.QtGui import QFont, QIcon, QColor
+from PyQt5.QtGui import QFont, QIcon, QColor, QImage, QPixmap
 
 logger = logging.getLogger("ti_nspire.panel_archivos")
 
 import sys, os as _os
 sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), ".."))
-from comunicacion.transferencia import GestorTransferencia, EntradaArchivo
+from comunicacion.transferencia import (
+    GestorTransferencia, EntradaArchivo, Captura,
+    OPS_SCREEN, OPS_NEWFLD, OPS_RENAME, OPS_OS,
+)
+
+# Extensiones de imagen de sistema operativo de la familia Nspire
+_EXT_OS = "Imagen de OS (*.tno *.tnc *.tcc *.tco *.tct *.tib);;Todos los archivos (*)"
 
 # Extensiones conocidas de la TI-Nspire
-_EXT_NSPIRE = {".tns", ".lua", ".py", ".lua", ".luac", ".8xp"}
+_EXT_NSPIRE = {".tns", ".lua", ".luac", ".py", ".8xp"}
 
 
 # ── Señales thread-safe ───────────────────────────────────────────────────────
@@ -35,6 +42,11 @@ class _Senales(QObject):
     conectado         = pyqtSignal(bool, str)   # (ok, mensaje)
     eliminado         = pyqtSignal(bool, str)   # (ok, mensaje)
     info_dispositivo  = pyqtSignal(dict)        # info OS/batería/memoria
+    capturado         = pyqtSignal(object, str) # (Captura | None, error)
+    carpeta_creada    = pyqtSignal(bool, str)   # (ok, mensaje)
+    renombrado        = pyqtSignal(bool, str)   # (ok, mensaje)
+    progreso_os       = pyqtSignal(str, float)  # (texto, porcentaje)
+    os_terminado      = pyqtSignal(bool, str)   # (ok, mensaje)
 
 
 # ── Panel principal ───────────────────────────────────────────────────────────
@@ -73,6 +85,13 @@ class PanelArchivos(QWidget):
         self._btn_desconectar.clicked.connect(self._desconectar)
         self._btn_desconectar.setEnabled(False)
         barra.addWidget(self._btn_desconectar)
+        self._btn_os = QPushButton("⚙  Actualizar OS...")
+        self._btn_os.setObjectName("btn_danger")
+        self._btn_os.setFixedHeight(30)
+        self._btn_os.setToolTip("Reinstalar el sistema operativo de la calculadora")
+        self._btn_os.clicked.connect(self._actualizar_os)
+        self._btn_os.setEnabled(False)
+        barra.addWidget(self._btn_os)
         root.addLayout(barra)
 
         # ── Splitter central ──────────────────────────────────────────────────
@@ -192,6 +211,27 @@ class PanelArchivos(QWidget):
         self._btn_actualizar.clicked.connect(self._actualizar_calc)
         nav.addWidget(self._btn_actualizar)
 
+        self._btn_nueva_carpeta = QPushButton("📁+ Carpeta")
+        self._btn_nueva_carpeta.setFixedHeight(26)
+        self._btn_nueva_carpeta.setEnabled(False)
+        self._btn_nueva_carpeta.setToolTip("Crear una carpeta en la calculadora")
+        self._btn_nueva_carpeta.clicked.connect(self._crear_carpeta)
+        nav.addWidget(self._btn_nueva_carpeta)
+
+        self._btn_captura = QPushButton("📷 Captura")
+        self._btn_captura.setFixedHeight(26)
+        self._btn_captura.setEnabled(False)
+        self._btn_captura.setToolTip("Capturar la pantalla de la calculadora")
+        self._btn_captura.clicked.connect(self._capturar_pantalla)
+        nav.addWidget(self._btn_captura)
+
+        self._btn_renombrar = QPushButton("✏️ Renombrar")
+        self._btn_renombrar.setFixedHeight(26)
+        self._btn_renombrar.setEnabled(False)
+        self._btn_renombrar.setToolTip("Renombrar el archivo seleccionado")
+        self._btn_renombrar.clicked.connect(self._renombrar)
+        nav.addWidget(self._btn_renombrar)
+
         self._btn_eliminar_calc = QPushButton("🗑 Eliminar")
         self._btn_eliminar_calc.setObjectName("btn_danger")
         self._btn_eliminar_calc.setFixedHeight(26)
@@ -243,6 +283,11 @@ class PanelArchivos(QWidget):
         self._senales.conectado.connect(self._on_conectado)
         self._senales.eliminado.connect(self._on_eliminado)
         self._senales.info_dispositivo.connect(self._on_info_dispositivo)
+        self._senales.capturado.connect(self._on_capturado)
+        self._senales.carpeta_creada.connect(self._on_carpeta_creada)
+        self._senales.renombrado.connect(self._on_renombrado)
+        self._senales.progreso_os.connect(self._on_progreso_os)
+        self._senales.os_terminado.connect(self._on_os_terminado)
 
     # ── Acciones de conexión ──────────────────────────────────────────────────
 
@@ -283,6 +328,10 @@ class PanelArchivos(QWidget):
             self._btn_desconectar.setEnabled(True)
             self._btn_actualizar.setEnabled(True)
             self._btn_enviar.setEnabled(True)
+            # solo se habilitan si la librería declara que este modelo las soporta
+            self._btn_captura.setEnabled(self._gestor.soporta(OPS_SCREEN))
+            self._btn_nueva_carpeta.setEnabled(self._gestor.soporta(OPS_NEWFLD))
+            self._btn_os.setEnabled(self._gestor.soporta(OPS_OS))
             self._agregar_log(f"✓ {msg}")
             # Primero listar archivos; _hilo_info_dispositivo arrancará al terminar
             self._actualizar_calc()
@@ -307,12 +356,13 @@ class PanelArchivos(QWidget):
             return
         # Mostrar en el log
         partes = []
+        if info.get("product_name"):
+            partes.append(info["product_name"])
         if info.get("os_version"):
             partes.append(f"OS {info['os_version']}")
-        bat = info.get("battery")
+        bat = info.get("bateria_ok")
         if bat is not None:
-            carga = " (cargando)" if info.get("charging") else ""
-            partes.append(f"Batería {bat}%{carga}")
+            partes.append("Batería OK" if bat else "Batería baja")
         ram = info.get("mem_free_ram")
         if ram is not None:
             partes.append(f"RAM libre {self._fmt_tam(ram)}")
@@ -327,11 +377,15 @@ class PanelArchivos(QWidget):
             barra.set_info_dispositivo(info)
 
     def _desconectar(self):
-        self._gestor.desconectar()
-        # Reanudar el monitor USB ahora que ticables liberó el dispositivo
-        monitor = self._monitor_usb()
-        if monitor:
-            monitor.reanudar()
+        # El gestor serializa con su propio lock: si hay una transferencia en
+        # curso, desconectar() espera a que acabe. Se hace en un hilo para no
+        # congelar la interfaz mientras tanto.
+        def _cerrar():
+            self._gestor.desconectar()
+            monitor = self._monitor_usb()
+            if monitor:
+                monitor.reanudar()
+        threading.Thread(target=_cerrar, daemon=True).start()
         self._conectado = False
         self._lbl_estado.setText("⚫  Calculadora no conectada")
         self._lbl_estado.setStyleSheet("color:#8b949e; font-size:12px;")
@@ -340,6 +394,10 @@ class PanelArchivos(QWidget):
         self._btn_actualizar.setEnabled(False)
         self._btn_enviar.setEnabled(False)
         self._btn_recibir.setEnabled(False)
+        self._btn_captura.setEnabled(False)
+        self._btn_nueva_carpeta.setEnabled(False)
+        self._btn_renombrar.setEnabled(False)
+        self._btn_os.setEnabled(False)
         self._tree_calc.clear()
         self._tree_calc.setVisible(False)
         self._placeholder.setVisible(True)
@@ -510,6 +568,8 @@ class PanelArchivos(QWidget):
             es_archivo = entrada is not None and not entrada.es_carpeta
             self._btn_recibir.setEnabled(self._conectado and es_archivo)
             self._btn_eliminar_calc.setEnabled(self._conectado and es_archivo)
+            self._btn_renombrar.setEnabled(
+                self._conectado and es_archivo and self._gestor.soporta(OPS_RENAME))
 
     # ── Notificaciones de USB desde VentanaPrincipal ──────────────────────────
 
@@ -563,6 +623,170 @@ class PanelArchivos(QWidget):
             self._agregar_log(f"✗ Error al eliminar: {msg}")
             self._btn_eliminar_calc.setEnabled(True)
 
+    # ── Renombrar ─────────────────────────────────────────────────────────────
+
+    def _renombrar(self):
+        item = self._tree_calc.currentItem()
+        entrada: EntradaArchivo = item.data(0, Qt.UserRole) if item else None
+        if not entrada or entrada.es_carpeta:
+            self._agregar_log("Selecciona un archivo (no una carpeta).")
+            return
+        nuevo, ok = QInputDialog.getText(
+            self, "Renombrar",
+            f"Nuevo nombre para '{entrada.nombre}':",
+            text=entrada.nombre)
+        if not ok or not nuevo.strip() or nuevo.strip() == entrada.nombre:
+            return
+        self._btn_renombrar.setEnabled(False)
+        threading.Thread(target=self._hilo_renombrar,
+                         args=(entrada, nuevo.strip()), daemon=True).start()
+
+    def _hilo_renombrar(self, entrada: EntradaArchivo, nuevo: str):
+        try:
+            bien, msg = self._gestor.renombrar(entrada, nuevo)
+        except Exception as e:
+            logger.exception("Error al renombrar")
+            bien, msg = False, str(e)
+        self._senales.renombrado.emit(bien, msg or nuevo)
+
+    def _on_renombrado(self, ok: bool, msg: str):
+        if ok:
+            self._agregar_log(f"✓ Renombrado a '{msg}'")
+            self._actualizar_calc()
+        else:
+            self._agregar_log(f"✗ Error al renombrar: {msg}")
+        self._calc_seleccion_cambio()
+
+    # ── Actualización del sistema operativo ───────────────────────────────────
+
+    def _actualizar_os(self):
+        ruta, _ = QFileDialog.getOpenFileName(
+            self, "Selecciona la imagen del sistema operativo",
+            os.path.expanduser("~"), _EXT_OS)
+        if not ruta:
+            return
+
+        # 1) validar el archivo antes de tocar nada
+        valido, detalle = self._gestor.validar_archivo_os(ruta)
+        if not valido:
+            QMessageBox.critical(self, "Imagen no válida", detalle)
+            self._agregar_log(f"✗ {detalle}")
+            return
+
+        # 2) confirmación escrita: no basta con un botón
+        texto, ok = QInputDialog.getText(
+            self, "Confirmar actualización del sistema operativo",
+            f"{detalle}\n\n"
+            f"Archivo: {os.path.basename(ruta)}\n\n"
+            "Esto REESCRIBE el firmware de la calculadora. Si se interrumpe\n"
+            "(cable suelto, batería baja) puede quedar inutilizable y habría\n"
+            "que recuperarla por el modo de emergencia.\n\n"
+            "No la desconectes ni cierres la aplicación durante el proceso.\n\n"
+            "Escribe ACTUALIZAR para continuar:")
+        if not ok or texto.strip() != "ACTUALIZAR":
+            self._agregar_log("Actualización de OS cancelada")
+            return
+
+        # 3) barra de progreso modal, cancelable
+        self._dlg_os = QProgressDialog(
+            "Preparando el envío...", "Cancelar", 0, 100, self)
+        self._dlg_os.setWindowTitle("Actualizando el sistema operativo")
+        self._dlg_os.setWindowModality(Qt.ApplicationModal)
+        self._dlg_os.setAutoClose(False)
+        self._dlg_os.setAutoReset(False)
+        self._dlg_os.setMinimumDuration(0)
+        self._dlg_os.canceled.connect(self._gestor.cancelar_operacion)
+        self._dlg_os.show()
+
+        self._btn_os.setEnabled(False)
+        self._agregar_log(f"⚙ Enviando OS: {os.path.basename(ruta)}")
+        threading.Thread(target=self._hilo_os, args=(ruta,), daemon=True).start()
+
+    def _hilo_os(self, ruta: str):
+        def cb(texto, pct):
+            self._senales.progreso_os.emit(texto, pct)
+        try:
+            bien, msg = self._gestor.actualizar_os(ruta, progreso_cb=cb)
+        except Exception as e:
+            logger.exception("Error al actualizar el OS")
+            bien, msg = False, str(e)
+        self._senales.os_terminado.emit(bien, msg)
+
+    def _on_progreso_os(self, texto: str, pct: float):
+        dlg = getattr(self, "_dlg_os", None)
+        if dlg is None:
+            return
+        if texto:
+            dlg.setLabelText(texto)
+        if pct >= 0:
+            dlg.setValue(int(pct))
+
+    def _on_os_terminado(self, ok: bool, msg: str):
+        dlg = getattr(self, "_dlg_os", None)
+        if dlg is not None:
+            dlg.close()
+            self._dlg_os = None
+        self._btn_os.setEnabled(self._conectado and self._gestor.soporta(OPS_OS))
+        if ok:
+            self._agregar_log(f"✓ {msg}")
+            QMessageBox.information(self, "Sistema operativo enviado", msg)
+        else:
+            self._agregar_log(f"✗ Error al actualizar el OS: {msg}")
+            QMessageBox.critical(self, "Error al actualizar el OS", msg)
+
+    # ── Captura de pantalla ───────────────────────────────────────────────────
+
+    def _capturar_pantalla(self):
+        self._btn_captura.setEnabled(False)
+        self._agregar_log("Capturando la pantalla de la calculadora...")
+        threading.Thread(target=self._hilo_capturar, daemon=True).start()
+
+    def _hilo_capturar(self):
+        try:
+            cap, err = self._gestor.capturar_pantalla()
+        except Exception as e:
+            logger.exception("Error al capturar")
+            cap, err = None, str(e)
+        self._senales.capturado.emit(cap, err)
+
+    def _on_capturado(self, cap, err: str):
+        self._btn_captura.setEnabled(
+            self._conectado and self._gestor.soporta(OPS_SCREEN))
+        if cap is None:
+            self._agregar_log(f"✗ Error al capturar: {err}")
+            return
+        self._agregar_log(f"✓ Captura recibida ({cap.ancho}x{cap.alto})")
+        _DialogoCaptura(cap, self).exec_()
+
+    # ── Crear carpeta ─────────────────────────────────────────────────────────
+
+    def _crear_carpeta(self):
+        nombre, ok = QInputDialog.getText(
+            self, "Nueva carpeta",
+            "Nombre de la carpeta que se creará en la calculadora:")
+        if not ok or not nombre.strip():
+            return
+        self._btn_nueva_carpeta.setEnabled(False)
+        threading.Thread(target=self._hilo_crear_carpeta,
+                         args=(nombre.strip(),), daemon=True).start()
+
+    def _hilo_crear_carpeta(self, nombre: str):
+        try:
+            bien, msg = self._gestor.crear_carpeta(nombre)
+        except Exception as e:
+            logger.exception("Error al crear carpeta")
+            bien, msg = False, str(e)
+        self._senales.carpeta_creada.emit(bien, msg or nombre)
+
+    def _on_carpeta_creada(self, ok: bool, msg: str):
+        self._btn_nueva_carpeta.setEnabled(
+            self._conectado and self._gestor.soporta(OPS_NEWFLD))
+        if ok:
+            self._agregar_log(f"✓ Carpeta '{msg}' creada")
+            self._actualizar_calc()
+        else:
+            self._agregar_log(f"✗ Error al crear la carpeta: {msg}")
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _agregar_log(self, msg: str):
@@ -587,3 +811,63 @@ class PanelArchivos(QWidget):
             ".luac": "📜",
             ".8xp":  "📐",
         }.get(ext, "📄")
+
+
+# ── Vista previa de la captura de pantalla ───────────────────────────────────
+
+class _DialogoCaptura(QDialog):
+    """Muestra la captura a tamaño doble y permite guardarla como PNG."""
+
+    def __init__(self, cap: Captura, parent=None):
+        super().__init__(parent)
+        self._cap = cap
+        self.setWindowTitle(f"Pantalla de la calculadora — {cap.ancho}x{cap.alto}")
+        self.setStyleSheet("QDialog { background:#0d1117; color:#c9d1d9; }")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        # QImage no se queda con el búfer: hay que copiarlo
+        img = QImage(cap.rgb888, cap.ancho, cap.alto,
+                     cap.ancho * 3, QImage.Format_RGB888).copy()
+        lbl = QLabel()
+        lbl.setPixmap(QPixmap.fromImage(img).scaled(
+            cap.ancho * 2, cap.alto * 2,
+            Qt.KeepAspectRatio, Qt.FastTransformation))
+        lbl.setStyleSheet("border:1px solid #30363d;")
+        lay.addWidget(lbl, 0, Qt.AlignCenter)
+
+        botones = QHBoxLayout()
+        botones.addStretch()
+        btn_guardar = QPushButton("💾  Guardar PNG...")
+        btn_guardar.setObjectName("btn_primary")
+        btn_guardar.setFixedHeight(30)
+        btn_guardar.clicked.connect(self._guardar)
+        botones.addWidget(btn_guardar)
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setFixedHeight(30)
+        btn_cerrar.clicked.connect(self.accept)
+        botones.addWidget(btn_cerrar)
+        lay.addLayout(botones)
+
+    def _guardar(self):
+        from datetime import datetime
+        sugerido = os.path.join(
+            os.path.expanduser("~"),
+            f"nspire_{datetime.now():%Y%m%d_%H%M%S}.png")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Guardar captura", sugerido, "Imagen PNG (*.png)")
+        if not ruta:
+            return
+        if not ruta.lower().endswith(".png"):
+            ruta += ".png"
+        try:
+            self._cap.guardar_png(ruta)
+        except OSError as e:
+            QMessageBox.critical(self, "Error al guardar", str(e))
+            return
+        padre = self.parent()
+        if padre is not None and hasattr(padre, "_agregar_log"):
+            padre._agregar_log(f"✓ Captura guardada en {ruta}")
+        self.accept()

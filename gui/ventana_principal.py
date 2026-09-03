@@ -118,6 +118,11 @@ class VentanaPrincipal(QMainWindow):
 
     def closeEvent(self, event):
         self._monitor.detener()
+        # Cerrar la sesión USB explícitamente: no confiar en el GC del gestor
+        try:
+            self._panel_archivos._gestor.cerrar()
+        except Exception:
+            pass
         event.accept()
 
     # ── Tema visual ───────────────────────────────────────────────────────────

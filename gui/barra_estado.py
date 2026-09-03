@@ -47,10 +47,10 @@ class BarraEstado(QWidget):
         if os_ver and os_ver != "—":
             partes.append(f"OS {os_ver}")
 
-        bat = info.get("battery")
+        # `battery` de ticalcs es un flag (batería suficiente), no un %
+        bat = info.get("bateria_ok")
         if bat is not None:
-            icono_bat = "🔋" if not info.get("charging") else "⚡"
-            partes.append(f"{icono_bat} {bat}%")
+            partes.append("🔋 Batería OK" if bat else "🪫 Batería baja")
 
         ram = info.get("mem_free_ram")
         if ram is not None:
