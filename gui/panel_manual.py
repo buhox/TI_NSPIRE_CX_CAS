@@ -115,6 +115,47 @@ kirchhoff_corrientes(2,-1,?)    → I[2] = -1 A</pre>
 científica de la Casio FX-880P. Documentado también en
 <code>calculadora/circuitos.py</code>.</p>
 
+<h3>RC de primer orden (elige el orden de los elementos)</h3>
+<p><code>circuito_rc_primer_orden</code> — no es de la librería FX-880P, es el
+análisis completo de un RC serie. El parámetro <code>orden</code> decide qué
+elemento va primero desde la fuente, es decir dónde se toma la salida:</p>
+<table>
+<tr><th>orden</th><th>Circuito</th><th>Salida en</th><th>Comportamiento</th></tr>
+<tr><td><code>RC</code></td><td>fuente → R → C</td><td>el capacitor</td><td>pasa-bajos / integrador</td></tr>
+<tr><td><code>CR</code></td><td>fuente → C → R</td><td>la resistencia</td><td>pasa-altos / diferenciador</td></tr>
+</table>
+<p>Parámetros: <code>r, c, v_fuente, orden</code> (por defecto <code>RC</code>) +
+opcionalmente <code>t, v0</code> para la respuesta al escalón v(t), y/o
+<code>f</code> para la respuesta en frecuencia (ganancia, dB y fase) en ese
+punto. Siempre calcula τ = R·C y la frecuencia de corte fc = 1/(2πτ).</p>
+<pre>circuito_rc_primer_orden(r=1000, c=1e-6, v_fuente=5, orden=RC, t=0.001)
+  → τ = 0.001 s, fc = 159.155 Hz, v(t=0.001 s) = 3.1606 V
+
+circuito_rc_primer_orden(r=1000, c=1e-6, v_fuente=5, orden=CR, f=159.155)
+  → |H| = 0.707107 (-3.01 dB), fase = 45°</pre>
+
+<h3>RLC de segundo orden (elige el elemento de salida)</h3>
+<p><code>circuito_rlc_segundo_orden</code> — circuito serie fuente–R–L–C ante un
+escalón Vs. El parámetro <code>salida</code> elige qué elemento se observa:</p>
+<table>
+<tr><th>salida</th><th>Voltaje observado</th><th>Comportamiento</th></tr>
+<tr><td><code>C</code></td><td>en el capacitor</td><td>pasa-bajos</td></tr>
+<tr><td><code>R</code></td><td>en la resistencia (∝ la corriente)</td><td>pasa-banda</td></tr>
+<tr><td><code>L</code></td><td>en el inductor</td><td>pasa-altos</td></tr>
+</table>
+<p>Parámetros: <code>r, l, c, v_fuente, salida</code> (por defecto <code>C</code>) +
+opcionalmente <code>t, v0, i0</code> para la respuesta al escalón v(t), y/o
+<code>f</code> para la respuesta en frecuencia. Siempre calcula ω0=1/√(LC), α=R/(2L),
+ζ=α/ω0, Q=1/(2ζ) y el régimen: <b>subamortiguado</b> (ζ&lt;1, oscila),
+<b>críticamente amortiguado</b> (ζ=1) o <b>sobreamortiguado</b> (ζ&gt;1, no oscila).</p>
+<pre>circuito_rlc_segundo_orden(r=20, l=0.1, c=100e-6, v_fuente=10, salida=C, t=0.006)
+  → ζ=0.316 (subamortiguado), v_out=9.47 V [vC=9.47 V, vR=3.56 V, vL=-3.03 V, i=0.178 A]
+
+circuito_rlc_segundo_orden(r=20, l=0.1, c=100e-6, v_fuente=10, salida=R, f=50.33)
+  → en f0 la salida en R tiene ganancia 1 (pasa todo); en C o en L, ganancia = Q</pre>
+<p class="nota">Verificado integrando numéricamente la ecuación diferencial del
+circuito (SciPy) en los tres regímenes de amortiguamiento — coincide hasta 10⁻¹⁰.</p>
+
 <h2 id="graficas">📈 Gráficas</h2>
 <p>Pestaña <b>Gráficas</b>: elige el modo con los botones superiores.</p>
 <table>

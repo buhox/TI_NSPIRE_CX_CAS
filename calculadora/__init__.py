@@ -10,4 +10,5 @@ from .circuitos import (
     valor_instantaneo, valor_efectivo, potencia_ac, factor_potencia,
     transformador, reactancia_inductiva, reactancia_capacitiva,
     impedancia, frecuencia_natural, oscilacion_electrica,
+    circuito_rc_primer_orden, circuito_rlc_segundo_orden,
 )

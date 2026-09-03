@@ -1,11 +1,14 @@
 # =============================================================================
 # CIRCUITOS AC Y DC — Librería científica de la FX-880P, sección 4 (pág. 273)
-# 16 fórmulas de circuitos eléctricos portadas a Python.
+# 16 fórmulas de circuitos eléctricos portadas a Python, más el análisis
+# completo de un RC de primer orden y un RLC de segundo orden (no están en la
+# librería FX-880P; usan las mismas reactancia/impedancia de más abajo).
 # Cada función recibe los valores conocidos y deja en None la incógnita a
 # despejar; si sobran o faltan datos, devuelve un ResultadoFormula con error.
 # =============================================================================
 
 from __future__ import annotations
+import cmath
 import logging
 import math
 from typing import Optional, Sequence
@@ -403,6 +406,168 @@ def oscilacion_electrica(l: Optional[float] = None, i: Optional[float] = None,
                              texto=f"L={l:.6g} H, I={i:.6g} A, Q={q:.6g} C, C={c:.6g} F")
 
 
+# ── Circuito RC de primer orden (elige el orden de los elementos) ───────────
+
+def circuito_rc_primer_orden(r: float, c: float, v_fuente: float, orden: str = "RC",
+                              t: Optional[float] = None, v0: float = 0.0,
+                              f: Optional[float] = None) -> ResultadoFormula:
+    """
+    Circuito RC serie de primer orden. `orden` elige qué elemento va primero
+    desde la fuente, es decir dónde se toma la salida:
+      "RC" — fuente-R-C, salida en el capacitor  → pasa-bajos / integrador
+      "CR" — fuente-C-R, salida en la resistencia → pasa-altos / diferenciador
+    Con `t` (s) calcula además la respuesta al escalón v(t), con `v0` el
+    voltaje inicial del capacitor (por defecto 0). Con `f` (Hz) calcula además
+    la respuesta en frecuencia (ganancia y fase) en ese punto.
+    """
+    orden = (orden or "RC").strip().upper()
+    if orden not in ("RC", "CR"):
+        return ResultadoFormula(error='orden debe ser "RC" (salida en C) o "CR" (salida en R)')
+    if r <= 0 or c <= 0:
+        return ResultadoFormula(error="R y C deben ser mayores que cero")
+
+    tau = r * c
+    fc = 1 / (2 * math.pi * tau)
+    tipo = "pasa-bajos (integrador)" if orden == "RC" else "pasa-altos (diferenciador)"
+    valores = {"tau": tau, "fc": fc, "orden": orden}
+    lineas = [f"Orden: {orden} — {tipo}",
+              f"τ = R·C = {tau:.6g} s", f"fc = 1/(2πτ) = {fc:.6g} Hz"]
+
+    if t is not None:
+        if t < 0:
+            return ResultadoFormula(error="t no puede ser negativo")
+        if orden == "RC":
+            v_out = v_fuente + (v0 - v_fuente) * math.exp(-t / tau)
+        else:
+            v_out = (v_fuente - v0) * math.exp(-t / tau)
+        valores.update(t=t, v0=v0, v_fuente=v_fuente, v_out=v_out)
+        lineas.append(f"v(t={t:.6g} s) = {v_out:.6g} V")
+
+    if f is not None:
+        if f < 0:
+            return ResultadoFormula(error="f no puede ser negativa")
+        wt = 2 * math.pi * f * tau
+        if orden == "RC":
+            mag = 1 / math.sqrt(1 + wt ** 2)
+            fase = -math.degrees(math.atan(wt))
+        else:
+            mag = wt / math.sqrt(1 + wt ** 2)
+            fase = 90.0 - math.degrees(math.atan(wt))
+        ganancia_db = 20 * math.log10(mag) if mag > 0 else float("-inf")
+        valores.update(f=f, ganancia=mag, ganancia_db=ganancia_db, fase_grados=fase)
+        lineas.append(f"|H(f={f:.6g} Hz)| = {mag:.6g} ({ganancia_db:.3g} dB), fase = {fase:.3g}°")
+
+    return ResultadoFormula(valores, texto="\n".join(lineas))
+
+
+# ── Circuito RLC de segundo orden (elige el elemento de salida) ─────────────
+
+def _rlc_vc_y_derivada(t: float, vs: float, v0: float, i0: float, c: float,
+                        alfa: float, omega0: float, zeta: float) -> tuple[float, float]:
+    """vC(t) y dvC/dt(t) de un RLC serie ante un escalón Vs, con vC(0)=v0 e
+    iL(0)=i0. Devuelve (vC, dvC/dt); dvC/dt sirve para obtener i(t)=C·dvC/dt."""
+    dv0 = i0 / c            # dvC/dt en t=0 (la corriente en un RLC serie carga el capacitor)
+    b = v0 - vs             # vC(0) − Vs, es el primer coeficiente en los tres regímenes
+
+    if zeta > 1:  # sobreamortiguado
+        disc = math.sqrt(alfa ** 2 - omega0 ** 2)
+        s1, s2 = -alfa + disc, -alfa - disc
+        a1 = (dv0 - s2 * b) / (s1 - s2)
+        a2 = b - a1
+        vc = vs + a1 * math.exp(s1 * t) + a2 * math.exp(s2 * t)
+        dvc = a1 * s1 * math.exp(s1 * t) + a2 * s2 * math.exp(s2 * t)
+    elif abs(zeta - 1) < 1e-9:  # críticamente amortiguado
+        a1 = b
+        a2 = dv0 + alfa * a1
+        exp_t = math.exp(-alfa * t)
+        vc = vs + (a1 + a2 * t) * exp_t
+        dvc = (a2 - alfa * (a1 + a2 * t)) * exp_t
+    else:  # subamortiguado
+        omega_d = math.sqrt(omega0 ** 2 - alfa ** 2)
+        a1 = b
+        a2 = (dv0 + alfa * a1) / omega_d
+        exp_t = math.exp(-alfa * t)
+        cos_t, sin_t = math.cos(omega_d * t), math.sin(omega_d * t)
+        vc = vs + exp_t * (a1 * cos_t + a2 * sin_t)
+        dvc = exp_t * (-alfa * (a1 * cos_t + a2 * sin_t) + (-a1 * omega_d * sin_t + a2 * omega_d * cos_t))
+    return vc, dvc
+
+
+def circuito_rlc_segundo_orden(r: float, l: float, c: float, v_fuente: float,
+                                salida: str = "C", t: Optional[float] = None,
+                                v0: float = 0.0, i0: float = 0.0,
+                                f: Optional[float] = None) -> ResultadoFormula:
+    """
+    Circuito RLC serie de segundo orden (fuente–R–L–C en serie, escalón Vs).
+    `salida` elige qué elemento se observa:
+      "C" — voltaje en el capacitor    → pasa-bajos
+      "R" — voltaje en la resistencia (∝ la corriente) → pasa-banda
+      "L" — voltaje en el inductor     → pasa-altos
+    Con `t` da la respuesta al escalón en ese instante (`v0` = voltaje inicial
+    del capacitor, `i0` = corriente inicial, ambos 0 por defecto). Con `f` da
+    la respuesta en frecuencia (ganancia, dB, fase) en ese punto. Siempre
+    calcula ω0, α, ζ, Q y el régimen de amortiguamiento.
+    """
+    salida = (salida or "C").strip().upper()
+    if salida not in ("R", "L", "C"):
+        return ResultadoFormula(error='salida debe ser "R", "L" o "C"')
+    if r <= 0 or l <= 0 or c <= 0:
+        return ResultadoFormula(error="R, L y C deben ser mayores que cero")
+
+    omega0 = 1 / math.sqrt(l * c)
+    alfa = r / (2 * l)
+    zeta = alfa / omega0
+    q = 1 / (2 * zeta) if zeta > 0 else float("inf")
+
+    if zeta > 1 + 1e-9:
+        regimen = "sobreamortiguado"
+    elif abs(zeta - 1) < 1e-9:
+        regimen = "críticamente amortiguado"
+    else:
+        regimen = "subamortiguado"
+
+    valores = {"omega0": omega0, "f0": omega0 / (2 * math.pi), "alfa": alfa,
+               "zeta": zeta, "q": q, "regimen": regimen, "salida": salida}
+    lineas = [f"ω0 = 1/√(LC) = {omega0:.6g} rad/s (f0 = {omega0 / (2 * math.pi):.6g} Hz)",
+              f"α = R/(2L) = {alfa:.6g} 1/s",
+              f"ζ = α/ω0 = {zeta:.6g}  →  {regimen}",
+              f"Q = 1/(2ζ) = {q:.6g}"]
+
+    if zeta < 1 - 1e-9:
+        omega_d = math.sqrt(omega0 ** 2 - alfa ** 2)
+        valores["omega_d"] = omega_d
+        valores["fd"] = omega_d / (2 * math.pi)
+        lineas.append(f"ωd = √(ω0²−α²) = {omega_d:.6g} rad/s (fd = {omega_d / (2 * math.pi):.6g} Hz)")
+
+    if t is not None:
+        if t < 0:
+            return ResultadoFormula(error="t no puede ser negativo")
+        vc, dvc = _rlc_vc_y_derivada(t, v_fuente, v0, i0, c, alfa, omega0, zeta)
+        i_t = c * dvc
+        vr = r * i_t
+        vl = v_fuente - vr - vc
+        v_out = {"C": vc, "R": vr, "L": vl}[salida]
+        valores.update(t=t, v0=v0, i0=i0, v_fuente=v_fuente,
+                        vc=vc, vr=vr, vl=vl, i=i_t, v_out=v_out)
+        lineas.append(f"v_out(t={t:.6g} s) = {v_out:.6g} V  "
+                       f"[vC={vc:.6g} V, vR={vr:.6g} V, vL={vl:.6g} V, i={i_t:.6g} A]")
+
+    if f is not None:
+        if f <= 0:
+            return ResultadoFormula(error="f debe ser mayor que cero")
+        w = 2 * math.pi * f
+        z_total = complex(r, w * l - 1 / (w * c))
+        impedancias = {"C": complex(0, -1 / (w * c)), "R": complex(r, 0), "L": complex(0, w * l)}
+        h = impedancias[salida] / z_total
+        mag = abs(h)
+        fase = math.degrees(cmath.phase(h))
+        ganancia_db = 20 * math.log10(mag) if mag > 0 else float("-inf")
+        valores.update(f=f, ganancia=mag, ganancia_db=ganancia_db, fase_grados=fase)
+        lineas.append(f"|H(f={f:.6g} Hz)| = {mag:.6g} ({ganancia_db:.3g} dB), fase = {fase:.3g}°")
+
+    return ResultadoFormula(valores, texto="\n".join(lineas))
+
+
 # ── Invocación por nombre desde la consola CAS ───────────────────────────────
 # Permite escribir, por ejemplo, "ley_ohm(v=12, i=2)" directamente en la
 # consola de la pestaña CAS (con "Evaluar / Simplificar" seleccionado).
@@ -424,6 +589,8 @@ _FUNCIONES_KWARGS = {
     "impedancia": impedancia,
     "frecuencia_natural": frecuencia_natural,
     "oscilacion_electrica": oscilacion_electrica,
+    "circuito_rc_primer_orden": circuito_rc_primer_orden,
+    "circuito_rlc_segundo_orden": circuito_rlc_segundo_orden,
 }
 _FUNCIONES_POSICIONALES = {
     "resistencia_serie": resistencia_serie,
@@ -438,11 +605,16 @@ NOMBRES_DISPONIBLES = sorted(
     set(_FUNCIONES_KWARGS) | set(_FUNCIONES_POSICIONALES) | set(_FUNCIONES_LISTA))
 
 
-def _parsear_valor(token: str) -> Optional[float]:
+def _parsear_valor(token: str):
+    """Convierte un token de la consola a float, o lo deja como texto (para
+    parámetros no numéricos como orden="RC")."""
     token = token.strip()
     if token in ("", "?", "none", "None"):
         return None
-    return float(token)
+    try:
+        return float(token)
+    except ValueError:
+        return token.strip("\"'")
 
 
 def _parsear_argumentos(texto: str) -> tuple[list, dict]:
